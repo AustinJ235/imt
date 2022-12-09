@@ -4,6 +4,7 @@ use crate::error::*;
 
 pub mod cmap_table;
 pub mod font;
+pub mod fvar_table;
 pub mod glyf_table;
 pub mod head_table;
 pub mod hhea_table;
@@ -15,6 +16,7 @@ pub mod ttc_header;
 
 pub use cmap_table::{CmapSubtable, CmapTable, EncodingRecord};
 pub use font::Font;
+pub use fvar_table::{FvarTable, InstanceRecord, VariationAxisRecord};
 pub use glyf_table::GlyfTable;
 pub use head_table::HeadTable;
 pub use hhea_table::HheaTable;
@@ -44,6 +46,16 @@ fn read_i64(bytes: &[u8], offset: usize) -> i64 {
     i64::from_be_bytes(bytes[offset..(offset + 8)].try_into().unwrap())
 }
 
+#[inline(always)]
+fn read_fixed(bytes: &[u8], offset: usize) -> f32 {
+    i32::from_be_bytes(bytes[offset..(offset + 4)].try_into().unwrap()) as f32 / 65536.0
+}
+
+#[inline(always)]
+fn read_f2dot14(bytes: &[u8], offset: usize) -> f32 {
+    i16::from_be_bytes(bytes[offset..(offset + 2)].try_into().unwrap()) as f32 / 16384.0
+}
+
 const fn tag(bytes: &[u8; 4]) -> u32 {
     u32::from_be_bytes(*bytes)
 }
@@ -57,6 +69,7 @@ pub mod table_tag {
     pub const MAXP: u32 = tag(b"maxp");
     pub const LOCA: u32 = tag(b"loca");
     pub const GLYF: u32 = tag(b"glyf");
+    pub const FVAR: u32 = tag(b"fvar");
 }
 
 #[allow(warnings)]

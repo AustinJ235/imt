@@ -32,4 +32,5 @@ pub enum ImtErrorSource {
     LocaTable,
     GlyfTable,
     FontData,
+    FvarTable,
 }

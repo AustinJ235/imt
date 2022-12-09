@@ -1,6 +1,7 @@
-use basalt::interface::bin::{self, BinStyle};
-use basalt::{Basalt, BstOptions};
 use std::time::Instant;
+
+use basalt::interface::bin::{self, BinStyle, ImageEffect};
+use basalt::{Basalt, BstOptions};
 
 pub const TEXT_HEIGHT: f32 = 13.0;
 pub const TEXT: &'static str = "Sphinx of black quartz, judge my vow.";
@@ -94,9 +95,10 @@ fn main() {
     );
 }
 
+use std::sync::Arc;
+
 use basalt::image_view::BstImageView;
 use imt::raster::gpu::image_view::{ImtImageVarient, ImtImageView};
-use std::sync::Arc;
 
 fn imt_image_to_bst(view: Arc<ImtImageView>) -> Arc<BstImageView> {
     let actual_view = view.image_view_ref();

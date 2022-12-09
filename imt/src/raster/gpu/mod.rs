@@ -37,6 +37,7 @@ impl GpuRasterizer {
         let downscale_cs = downscale_cs::load(queue.device().clone()).unwrap();
         let hinting_cs = hinting_cs::load(queue.device().clone()).unwrap();
 
+        // TODO: Set local size here
         let nonzero_pipeline = ComputePipeline::new(
             queue.device().clone(),
             nonzero_cs.entry_point("main").unwrap(),
@@ -46,6 +47,7 @@ impl GpuRasterizer {
         )
         .unwrap();
 
+        // TODO: Set local size here
         let downscale_pipeline = ComputePipeline::new(
             queue.device().clone(),
             downscale_cs.entry_point("main").unwrap(),
@@ -55,6 +57,7 @@ impl GpuRasterizer {
         )
         .unwrap();
 
+        // TODO: Set local size here
         let hinting_pipeline = ComputePipeline::new(
             queue.device().clone(),
             hinting_cs.entry_point("main").unwrap(),

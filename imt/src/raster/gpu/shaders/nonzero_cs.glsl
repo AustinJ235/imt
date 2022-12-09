@@ -16,7 +16,7 @@ layout(set = 0, binding = 1) readonly buffer SegmentData {
     vec4 data[];
 } segments;
 
-layout(set = 0, binding = 2) writeonly uniform image2D bitmap;
+layout(set = 0, binding = 2, r8) writeonly uniform image2D bitmap;
 
 bool ray_intersects(vec2 l1p1, vec2 l1p2, vec2 l2p1, vec2 l2p2) {
     vec2 r = l1p2 - l1p1;

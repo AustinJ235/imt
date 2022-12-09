@@ -11,6 +11,7 @@ pub struct Font {
     hmtx: HmtxTable,
     maxp: MaxpTable,
     glyf: GlyfTable,
+    fvar: Option<FvarTable>,
 }
 
 impl Font {
@@ -41,6 +42,7 @@ impl Font {
         let mut maxp_table_index = None;
         let mut loca_table_index = None;
         let mut glyf_table_index = None;
+        let mut fvar_table_index = None;
 
         for (i, table_record) in table_directory.table_records.iter().enumerate() {
             match table_record.table_tag {
@@ -51,6 +53,7 @@ impl Font {
                 table_tag::MAXP => maxp_table_index = Some(i),
                 table_tag::LOCA => loca_table_index = Some(i),
                 table_tag::GLYF => glyf_table_index = Some(i),
+                table_tag::FVAR => fvar_table_index = Some(i),
                 _ => (),
             }
         }
@@ -216,6 +219,24 @@ impl Font {
             },
         };
 
+        let fvar = match fvar_table_index {
+            Some(table_index) => {
+                let table_record = &table_directory.table_records[table_index];
+                let start = table_record.offset as usize;
+                let end = start + table_record.length as usize;
+
+                if end > bytes.len() {
+                    return Err(ImtError {
+                        kind: ImtErrorKind::Truncated,
+                        source: ImtErrorSource::GlyfTable,
+                    });
+                }
+
+                Some(FvarTable::try_parse(&bytes[start..end], 0)?)
+            },
+            None => None,
+        };
+
         Ok(Self {
             cmap,
             head,
@@ -223,6 +244,7 @@ impl Font {
             hmtx,
             maxp,
             glyf,
+            fvar,
         })
     }
 
@@ -248,5 +270,9 @@ impl Font {
 
     pub fn glyf_table(&self) -> &GlyfTable {
         &self.glyf
+    }
+
+    pub fn fvar_table(&self) -> Option<&FvarTable> {
+        self.fvar.as_ref()
     }
 }
