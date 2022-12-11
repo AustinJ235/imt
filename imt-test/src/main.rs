@@ -16,7 +16,6 @@ fn main() {
             .app_loop(),
         Box::new(move |basalt_res| {
             let basalt = basalt_res.unwrap();
-            let mut start = Instant::now();
             let roboto = include_bytes!("../../imt/src/RobotoFlex.ttf");
             let font = imt::parse::Font::from_bytes(roboto).unwrap();
             let mut bins = Vec::new();
@@ -25,6 +24,7 @@ fn main() {
             let max_y = (font.head_table().y_max as f32 * scaler).ceil();
 
             let rasterizer = imt::raster::gpu::GpuRasterizer::new(basalt.compute_queue());
+            let mut start = Instant::now();
 
             for c in TEXT.chars() {
                 let index = font.cmap_table().encoding_records[0]

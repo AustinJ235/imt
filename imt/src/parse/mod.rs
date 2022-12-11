@@ -11,6 +11,7 @@ pub mod hhea_table;
 pub mod hmtx_table;
 pub mod loca_table;
 pub mod maxp_table;
+pub mod name_table;
 pub mod table_directory;
 pub mod ttc_header;
 
@@ -23,6 +24,7 @@ pub use hhea_table::HheaTable;
 pub use hmtx_table::HmtxTable;
 pub use loca_table::LocaTable;
 pub use maxp_table::MaxpTable;
+pub use name_table::{LangTagRecord, NameRecord, NameTable};
 pub use table_directory::{TableDirectory, TableRecord};
 pub use ttc_header::TTCHeader;
 
@@ -56,6 +58,39 @@ fn read_f2dot14(bytes: &[u8], offset: usize) -> f32 {
     i16::from_be_bytes(bytes[offset..(offset + 2)].try_into().unwrap()) as f32 / 16384.0
 }
 
+fn read_utf16be(
+    bytes: &[u8],
+    offset: usize,
+    length: usize,
+    source: ImtErrorSource,
+) -> Result<String, ImtError> {
+    if length % 2 != 0 {
+        return Err(ImtError {
+            kind: ImtErrorKind::Malformed,
+            source,
+        });
+    }
+
+    if offset + length > bytes.len() {
+        return Err(ImtError {
+            kind: ImtErrorKind::Truncated,
+            source,
+        });
+    }
+
+    let utf16 = bytes[offset..(offset + length)]
+        .chunks_exact(2)
+        .map(|chunk| u16::from_be_bytes(chunk.try_into().unwrap()))
+        .collect::<Vec<u16>>();
+
+    String::from_utf16(&utf16).map_err(|_| {
+        ImtError {
+            kind: ImtErrorKind::Malformed,
+            source,
+        }
+    })
+}
+
 const fn tag(bytes: &[u8; 4]) -> u32 {
     u32::from_be_bytes(*bytes)
 }
@@ -70,6 +105,7 @@ pub mod table_tag {
     pub const LOCA: u32 = tag(b"loca");
     pub const GLYF: u32 = tag(b"glyf");
     pub const FVAR: u32 = tag(b"fvar");
+    pub const NAME: u32 = tag(b"name");
 }
 
 #[allow(warnings)]

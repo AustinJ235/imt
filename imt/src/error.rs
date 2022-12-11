@@ -33,4 +33,7 @@ pub enum ImtErrorSource {
     GlyfTable,
     FontData,
     FvarTable,
+    NameTable,
+    NameRecord,
+    NameTagRecord,
 }

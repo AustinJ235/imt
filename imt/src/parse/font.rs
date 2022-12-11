@@ -1,6 +1,6 @@
 use crate::parse::*;
 
-// TODO: Tables not currently parsed in RobotoFlex: GDEF, GPOS, GSUB, HVAR, OS/2, STAT, avar, fvar
+// TODO: Tables not currently parsed in RobotoFlex: GDEF, GPOS, GSUB, HVAR, OS/2, STAT, avar,
 //       gasp, gvar, name, post, prep
 
 #[derive(Debug, Clone)]
@@ -10,6 +10,7 @@ pub struct Font {
     hhea: HheaTable,
     hmtx: HmtxTable,
     maxp: MaxpTable,
+    name: NameTable,
     glyf: GlyfTable,
     fvar: Option<FvarTable>,
 }
@@ -40,6 +41,7 @@ impl Font {
         let mut hhea_table_index = None;
         let mut hmtx_table_index = None;
         let mut maxp_table_index = None;
+        let mut name_table_index = None;
         let mut loca_table_index = None;
         let mut glyf_table_index = None;
         let mut fvar_table_index = None;
@@ -54,6 +56,7 @@ impl Font {
                 table_tag::LOCA => loca_table_index = Some(i),
                 table_tag::GLYF => glyf_table_index = Some(i),
                 table_tag::FVAR => fvar_table_index = Some(i),
+                table_tag::NAME => name_table_index = Some(i),
                 _ => (),
             }
         }
@@ -150,6 +153,29 @@ impl Font {
             },
         };
 
+        let name = match name_table_index {
+            Some(table_index) => {
+                let table_record = &table_directory.table_records[table_index];
+                let start = table_record.offset as usize;
+                let end = start + table_record.length as usize;
+
+                if end > bytes.len() {
+                    return Err(ImtError {
+                        kind: ImtErrorKind::Truncated,
+                        source: ImtErrorSource::NameTable,
+                    });
+                }
+
+                NameTable::try_parse(&bytes[start..end], 0)?
+            },
+            None => {
+                return Err(ImtError {
+                    kind: ImtErrorKind::MissingTable,
+                    source: ImtErrorSource::NameTable,
+                })
+            },
+        };
+
         let hmtx = match hmtx_table_index {
             Some(table_index) => {
                 let table_record = &table_directory.table_records[table_index];
@@ -228,7 +254,7 @@ impl Font {
                 if end > bytes.len() {
                     return Err(ImtError {
                         kind: ImtErrorKind::Truncated,
-                        source: ImtErrorSource::GlyfTable,
+                        source: ImtErrorSource::FvarTable,
                     });
                 }
 
@@ -243,6 +269,7 @@ impl Font {
             hhea,
             hmtx,
             maxp,
+            name,
             glyf,
             fvar,
         })
@@ -266,6 +293,10 @@ impl Font {
 
     pub fn maxp_table(&self) -> &MaxpTable {
         &self.maxp
+    }
+
+    pub fn name_table(&self) -> &NameTable {
+        &self.name
     }
 
     pub fn glyf_table(&self) -> &GlyfTable {
