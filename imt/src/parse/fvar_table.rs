@@ -119,6 +119,10 @@ impl VariationAxisRecord {
             axis_name_id: read_u16(bytes, record_offset + 18),
         }
     }
+
+    pub fn hidden_axis(&self) -> bool {
+        self.flags & 0x0001 == 0x0001
+    }
 }
 
 #[derive(Debug, Clone)]

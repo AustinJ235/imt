@@ -6,6 +6,7 @@ pub mod cmap_table;
 pub mod font;
 pub mod fvar_table;
 pub mod glyf_table;
+pub mod gvar_table;
 pub mod head_table;
 pub mod hhea_table;
 pub mod hmtx_table;
@@ -19,6 +20,7 @@ pub use cmap_table::{CmapSubtable, CmapTable, EncodingRecord};
 pub use font::Font;
 pub use fvar_table::{FvarTable, InstanceRecord, VariationAxisRecord};
 pub use glyf_table::GlyfTable;
+pub use gvar_table::GvarTable;
 pub use head_table::HeadTable;
 pub use hhea_table::HheaTable;
 pub use hmtx_table::HmtxTable;
@@ -106,16 +108,5 @@ pub mod table_tag {
     pub const GLYF: u32 = tag(b"glyf");
     pub const FVAR: u32 = tag(b"fvar");
     pub const NAME: u32 = tag(b"name");
-}
-
-#[allow(warnings)]
-pub fn test() {
-    let bytes = include_bytes!("../RobotoFlex.ttf");
-
-    let start = std::time::Instant::now();
-    let font = Font::from_bytes(bytes).unwrap();
-    println!(
-        "Elapsed: {:.3} ms",
-        start.elapsed().as_micros() as f32 / 1000.0
-    );
+    pub const GVAR: u32 = tag(b"gvar");
 }

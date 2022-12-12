@@ -18,6 +18,28 @@ fn main() {
             let basalt = basalt_res.unwrap();
             let roboto = include_bytes!("../../imt/src/RobotoFlex.ttf");
             let font = imt::parse::Font::from_bytes(roboto).unwrap();
+
+            let fvar = font.fvar_table().unwrap();
+
+            for axis in fvar.axes.iter() {
+                if axis.hidden_axis() {
+                    continue;
+                }
+
+                let name = font
+                    .name_table()
+                    .name_records
+                    .iter()
+                    .filter(|record| record.name_id == axis.axis_name_id)
+                    .next()
+                    .unwrap();
+
+                println!(
+                    "Axis '{}', Min: {}, Default: {}, Max: {}",
+                    name.name, axis.min_value, axis.default_value, axis.max_value
+                );
+            }
+
             let mut bins = Vec::new();
             let mut x = 0.0;
             let scaler = (1.0 / font.head_table().units_per_em as f32) * TEXT_HEIGHT;

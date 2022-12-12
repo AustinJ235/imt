@@ -36,4 +36,5 @@ pub enum ImtErrorSource {
     NameTable,
     NameRecord,
     NameTagRecord,
+    GvarTable,
 }
