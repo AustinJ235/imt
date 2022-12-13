@@ -2,6 +2,7 @@
 
 use crate::error::*;
 
+pub mod avar_table;
 pub mod cmap_table;
 pub mod font;
 pub mod fvar_table;
@@ -16,6 +17,7 @@ pub mod name_table;
 pub mod table_directory;
 pub mod ttc_header;
 
+pub use avar_table::{AvarTable, AxisValueMap, SegmentMap};
 pub use cmap_table::{CmapSubtable, CmapTable, EncodingRecord};
 pub use font::Font;
 pub use fvar_table::{FvarTable, InstanceRecord, VariationAxisRecord};
@@ -109,4 +111,5 @@ pub mod table_tag {
     pub const FVAR: u32 = tag(b"fvar");
     pub const NAME: u32 = tag(b"name");
     pub const GVAR: u32 = tag(b"gvar");
+    pub const AVAR: u32 = tag(b"avar");
 }

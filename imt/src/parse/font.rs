@@ -1,7 +1,7 @@
 use crate::parse::*;
 
 // TODO: Tables not currently parsed in RobotoFlex: GDEF, GPOS, GSUB, HVAR, OS/2, STAT, avar,
-//       gasp, gvar, name, post, prep
+//       gasp, post, prep
 
 #[derive(Debug, Clone)]
 pub struct Font {
@@ -14,6 +14,7 @@ pub struct Font {
     glyf: GlyfTable,
     fvar: Option<FvarTable>,
     gvar: Option<GvarTable>,
+    avar: Option<AvarTable>,
 }
 
 impl Font {
@@ -47,6 +48,7 @@ impl Font {
         let mut glyf_table_index = None;
         let mut fvar_table_index = None;
         let mut gvar_table_index = None;
+        let mut avar_table_index = None;
 
         for (i, table_record) in table_directory.table_records.iter().enumerate() {
             match table_record.table_tag {
@@ -60,6 +62,7 @@ impl Font {
                 table_tag::FVAR => fvar_table_index = Some(i),
                 table_tag::NAME => name_table_index = Some(i),
                 table_tag::GVAR => gvar_table_index = Some(i),
+                table_tag::AVAR => avar_table_index = Some(i),
                 _ => (),
             }
         }
@@ -284,6 +287,24 @@ impl Font {
             None => None,
         };
 
+        let avar = match avar_table_index {
+            Some(table_index) => {
+                let table_record = &table_directory.table_records[table_index];
+                let start = table_record.offset as usize;
+                let end = start + table_record.length as usize;
+
+                if end > bytes.len() {
+                    return Err(ImtError {
+                        kind: ImtErrorKind::Truncated,
+                        source: ImtErrorSource::AvarTable,
+                    });
+                }
+
+                Some(AvarTable::try_parse(&bytes[start..end], 0)?)
+            },
+            None => None,
+        };
+
         Ok(Self {
             cmap,
             head,
@@ -294,6 +315,7 @@ impl Font {
             glyf,
             fvar,
             gvar,
+            avar,
         })
     }
 
@@ -331,5 +353,9 @@ impl Font {
 
     pub fn gvar_table(&self) -> Option<&GvarTable> {
         self.gvar.as_ref()
+    }
+
+    pub fn avar_table(&self) -> Option<&AvarTable> {
+        self.avar.as_ref()
     }
 }
