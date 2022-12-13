@@ -15,6 +15,8 @@ pub struct Outline {
     pub x_max: i16,
     pub y_max: i16,
     pub contours: Vec<OutlineContour>,
+    /// The number of points before they were unpacked.
+    pub num_packed_points: usize,
 }
 
 impl Outline {
@@ -443,6 +445,7 @@ impl GlyfTable {
                     x_max,
                     y_max,
                     contours,
+                    num_packed_points: number_of_points,
                 };
 
                 outlines.insert(i as u16, outline);

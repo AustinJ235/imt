@@ -103,8 +103,8 @@ impl GvarTable {
         }
 
         for i in 0..glyph_count {
-            let num_points = match glyf_table.outlines.get(&(i as u16)) {
-                Some(outline) => outline.points().count() + 4,
+            let outline = match glyf_table.outlines.get(&(i as u16)) {
+                Some(outline) => outline,
                 None => continue,
             };
 
@@ -163,10 +163,8 @@ impl GvarTable {
                     return Err(TRUNCATED);
                 }
 
-                let test_a = serialized_offset;
-
                 let variation_data_size =
-                    read_u16(glyph_variation_data, tuple_variation_header_offset);
+                    read_u16(glyph_variation_data, tuple_variation_header_offset) as usize;
                 let tuple_index = read_u16(glyph_variation_data, tuple_variation_header_offset + 2);
                 tuple_variation_header_offset += 4;
                 let has_embedded_peak_tuple = tuple_index & 0x8000 != 0;
@@ -234,30 +232,59 @@ impl GvarTable {
 
                 let mut point_numbers = Vec::new();
 
-                if has_private_point_numbers {
+                let delta_offset = if has_private_point_numbers {
                     if serialized_offset >= serialized_data.len() {
                         return Err(TRUNCATED);
                     }
 
-                    serialized_offset += parse_packed_points(
-                        &serialized_data[serialized_offset..],
+                    parse_packed_points(
+                        &serialized_data
+                            [serialized_offset..(serialized_offset + variation_data_size)],
                         &mut point_numbers,
-                    )?;
+                    )?
                 } else {
                     point_numbers.extend_from_slice(&shared_point_numbers);
+                    0
+                };
+
+                if serialized_offset + delta_offset >= serialized_data.len() {
+                    return Err(MALFORMED);
                 }
 
-                /*let num_deltas = if point_numbers.is_empty() {
-                    num_points
+                let delta_count = if point_numbers.is_empty() {
+                    outline.num_packed_points + 4
                 } else {
                     point_numbers.len()
                 };
 
-                let x_deltas = parse_packed_deltas(serialized_data, &mut serialized_offset, num_deltas)?;
-                let y_deltas = parse_packed_deltas(serialized_data, &mut serialized_offset, num_deltas)?;*/
+                if let Err(_) = parse_packed_deltas(
+                    &serialized_data[(serialized_offset + delta_offset)
+                        ..(serialized_offset + variation_data_size)],
+                    delta_count,
+                ) {
+                    println!(
+                        "glyph_index: {}, has_private_point_numbers: {}, point_numbers.len(): {}, \
+                         outline.num_packed_points: {}",
+                        i,
+                        has_private_point_numbers,
+                        point_numbers.len(),
+                        outline.num_packed_points,
+                    );
 
-                // TODO: Tempororay until all parsing is implemented.
-                serialized_offset += variation_data_size as usize - (serialized_offset - test_a);
+                    for v in &serialized_data[(serialized_offset + delta_offset)
+                        ..(serialized_offset + variation_data_size)]
+                    {
+                        print!("{:0<#8b} ", v);
+                    }
+
+                    println!(
+                        "\n{:?}",
+                        &serialized_data[(serialized_offset + delta_offset)
+                            ..(serialized_offset + variation_data_size)]
+                    );
+                }
+
+                serialized_offset += variation_data_size;
             }
         }
 
@@ -269,130 +296,127 @@ impl GvarTable {
     }
 }
 
-// TODO: Not how this works
-fn parse_packed_deltas(
-    serialized_data: &[u8],
-    serialized_offset: &mut usize,
-    count: usize,
-) -> Result<Vec<i16>, ImtError> {
-    let mut deltas = Vec::with_capacity(count);
+fn parse_packed_deltas(bytes: &[u8], count: usize) -> Result<Vec<[i16; 2]>, ImtError> {
+    let count_x2 = count * 2;
+    let mut deltas = Vec::with_capacity(count_x2);
+    let mut are_zero = false;
+    let mut are_words = false;
     let mut remaining = 0;
-    let mut deltas_are_words = false;
+    let mut offset = 0;
 
     loop {
         if remaining == 0 {
-            if deltas.len() == count {
-                break;
-            }
-
-            if *serialized_offset >= serialized_data.len() {
-                return Err(TRUNCATED);
-            }
-
-            let deltas_are_zero = serialized_data[*serialized_offset] & 0x80 != 0;
-            deltas_are_words = serialized_data[*serialized_offset] & 0x40 != 0;
-            remaining = (serialized_data[*serialized_offset] & 0x3F) as usize + 1;
-            *serialized_offset += 1;
-
-            if deltas.len() + remaining > count {
-                println!("here: {} {} {}", deltas.len(), remaining, count);
+            if deltas.len() > count_x2 {
                 return Err(MALFORMED);
             }
 
-            if deltas_are_zero {
-                for _ in 0..remaining {
-                    deltas.push(0);
-                }
-
-                remaining = 0;
+            if deltas.len() == count_x2 {
+                break;
             }
-        } else if deltas_are_words {
-            if *serialized_offset + 2 > serialized_data.len() {
+
+            if offset + 1 > bytes.len() {
+                println!("8");
                 return Err(TRUNCATED);
             }
 
-            deltas.push(read_i16(serialized_data, *serialized_offset));
-            *serialized_offset += 2;
+            are_zero = bytes[offset] & 0x80 != 0;
+            are_words = bytes[offset] & 0x40 != 0;
+            remaining = (bytes[offset] & 0x3F) as usize + 1;
+            offset += 1;
+        } else if are_zero {
+            deltas.push(0);
             remaining -= 1;
+        } else if are_words {
+            if offset + 2 > bytes.len() {
+                println!("7");
+                return Err(TRUNCATED);
+            }
+
+            deltas.push(i16::from_be_bytes([bytes[offset], bytes[offset + 1]]));
+            remaining -= 1;
+            offset += 2;
         } else {
-            if *serialized_offset >= serialized_data.len() {
+            if offset + 1 > bytes.len() {
+                println!("6");
                 return Err(TRUNCATED);
             }
 
-            deltas.push(i8::from_be_bytes([serialized_data[*serialized_offset]]) as i16);
-            *serialized_offset += 1;
+            deltas.push(i8::from_be_bytes([bytes[offset]]) as i16);
             remaining -= 1;
+            offset += 1;
         }
     }
 
-    Ok(deltas)
+    debug_assert!(deltas.len() == count_x2);
+    let y_deltas = deltas.split_off(count);
+    Ok(deltas
+        .into_iter()
+        .zip(y_deltas.into_iter())
+        .map(|(x, y)| [x, y])
+        .collect())
 }
 
-fn parse_packed_points(
-    serialized_data: &[u8],
-    point_numbers: &mut Vec<u16>,
-) -> Result<usize, ImtError> {
-    let mut serialized_offset = 0;
+fn parse_packed_points(bytes: &[u8], points: &mut Vec<u16>) -> Result<usize, ImtError> {
+    let mut offset = 0;
 
-    if 1 > serialized_data.len() {
+    if 1 > bytes.len() {
         return Err(TRUNCATED);
     }
 
-    let total = if serialized_data[0] & 0x80 != 0 {
-        if 2 > serialized_data.len() {
+    let total = if bytes[0] & 0x80 != 0 {
+        if 2 > bytes.len() {
             return Err(TRUNCATED);
         }
 
-        u16::from_be_bytes([serialized_data[0] & 0x7F, serialized_data[1]]) as usize
+        u16::from_be_bytes([bytes[0] & 0x7F, bytes[1]]) as usize
     } else {
-        serialized_offset += 1;
-        serialized_data[0] as usize
+        offset += 1;
+        bytes[0] as usize
     };
 
     if total == 0 {
-        return Ok(serialized_offset);
+        return Ok(offset);
     }
 
-    point_numbers.reserve_exact(total);
+    points.reserve_exact(total);
     let mut remaining = 0;
     let mut points_are_words = false;
 
     loop {
         if remaining == 0 {
-            if point_numbers.len() == total {
+            if points.len() == total {
                 break;
             }
 
-            if serialized_offset >= serialized_data.len() {
+            if offset >= bytes.len() {
                 return Err(TRUNCATED);
             }
 
-            remaining = (serialized_data[serialized_offset] & 0x7F) as usize + 1;
-            points_are_words = serialized_data[serialized_offset] & 0x80 != 0;
-            serialized_offset += 1;
+            remaining = (bytes[offset] & 0x7F) as usize + 1;
+            points_are_words = bytes[offset] & 0x80 != 0;
+            offset += 1;
 
-            if point_numbers.len() + remaining > total {
-                println!("here2");
+            if points.len() + remaining > total {
                 return Err(MALFORMED);
             }
         } else if points_are_words {
-            if serialized_offset + 2 > serialized_data.len() {
+            if offset + 2 > bytes.len() {
                 return Err(TRUNCATED);
             }
 
-            point_numbers.push(read_u16(serialized_data, serialized_offset));
-            serialized_offset += 2;
+            points.push(read_u16(bytes, offset));
+            offset += 2;
             remaining -= 1;
         } else {
-            if serialized_offset >= serialized_data.len() {
+            if offset >= bytes.len() {
                 return Err(TRUNCATED);
             }
 
-            point_numbers.push(serialized_data[serialized_offset] as u16);
-            serialized_offset += 1;
+            points.push(bytes[offset] as u16);
+            offset += 1;
             remaining -= 1;
         }
     }
 
-    Ok(serialized_offset)
+    Ok(offset)
 }
