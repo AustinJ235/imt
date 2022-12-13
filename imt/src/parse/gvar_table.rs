@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::error::*;
-use crate::parse::{read_f2dot14, read_i16, read_u16, read_u32, GlyfTable};
+use crate::parse::{read_f2dot14, read_u16, read_u32, GlyfTable};
 
 /// Corresponds to the `gvar` table.
 /// <https://learn.microsoft.com/en-us/typography/opentype/spec/gvar>
@@ -9,23 +9,30 @@ use crate::parse::{read_f2dot14, read_i16, read_u16, read_u32, GlyfTable};
 pub struct GvarTable {
     pub major_version: u16,
     pub minor_version: u16,
-    pub glyph_variation: BTreeMap<u16, GlyphVariation>,
+    pub glyph_variations: BTreeMap<u16, GlyphVariation>,
 }
 
 #[derive(Debug, Clone)]
 pub struct GlyphVariation {
-    pub tuple_variations: Vec<TupleVariation>,
+    pub tuples: Vec<TupleVariation>,
 }
 
 #[derive(Debug, Clone)]
 pub struct TupleVariation {
+    /// Length equal to axis count
     pub peak: Vec<f32>,
-    pub intermediate: Option<IntermediateTuples>,
+    pub interm: Option<IntermediateTuples>,
+    /// If points is empty all points are used
+    pub points: Vec<u16>,
+    /// Length equal to points length or num of packed points from glyf
+    pub deltas: Vec<[i16; 2]>,
 }
 
 #[derive(Debug, Clone)]
 pub struct IntermediateTuples {
+    /// Length equal to axis count
     pub start: Vec<f32>,
+    /// Length equal to axis count
     pub end: Vec<f32>,
 }
 
@@ -102,6 +109,8 @@ impl GvarTable {
             shared_tuples.push(read_f2dot14(bytes, shared_tuples_offset + (i * 2)));
         }
 
+        let mut glyph_variations = BTreeMap::new();
+
         for i in 0..glyph_count {
             let outline = match glyf_table.outlines.get(&(i as u16)) {
                 Some(outline) => outline,
@@ -158,7 +167,7 @@ impl GvarTable {
             let mut tuple_variations: Vec<TupleVariation> =
                 Vec::with_capacity(tuple_variation_count);
 
-            for k in 0..tuple_variation_count {
+            for _ in 0..tuple_variation_count {
                 if tuple_variation_header_offset + 4 > glyph_variation_data.len() {
                     return Err(TRUNCATED);
                 }
@@ -225,7 +234,10 @@ impl GvarTable {
                         tuple_variation_header_offset += 2;
                     }
 
-                    Some((start_tuple, end_tuple))
+                    Some(IntermediateTuples {
+                        start: start_tuple,
+                        end: end_tuple,
+                    })
                 } else {
                     None
                 };
@@ -247,6 +259,12 @@ impl GvarTable {
                     0
                 };
 
+                if point_numbers.last().copied().unwrap_or(0) as usize
+                    > outline.num_packed_points + 4
+                {
+                    return Err(MALFORMED);
+                }
+
                 if serialized_offset + delta_offset >= serialized_data.len() {
                     return Err(MALFORMED);
                 }
@@ -257,41 +275,34 @@ impl GvarTable {
                     point_numbers.len()
                 };
 
-                if let Err(_) = parse_packed_deltas(
+                let deltas = parse_packed_deltas(
                     &serialized_data[(serialized_offset + delta_offset)
                         ..(serialized_offset + variation_data_size)],
                     delta_count,
-                ) {
-                    println!(
-                        "glyph_index: {}, has_private_point_numbers: {}, point_numbers.len(): {}, \
-                         outline.num_packed_points: {}",
-                        i,
-                        has_private_point_numbers,
-                        point_numbers.len(),
-                        outline.num_packed_points,
-                    );
-
-                    for v in &serialized_data[(serialized_offset + delta_offset)
-                        ..(serialized_offset + variation_data_size)]
-                    {
-                        print!("{:0<#8b} ", v);
-                    }
-
-                    println!(
-                        "\n{:?}",
-                        &serialized_data[(serialized_offset + delta_offset)
-                            ..(serialized_offset + variation_data_size)]
-                    );
-                }
+                )?;
 
                 serialized_offset += variation_data_size;
+
+                tuple_variations.push(TupleVariation {
+                    peak: peak_tuple,
+                    interm: intermediate_tuples,
+                    points: point_numbers,
+                    deltas,
+                });
             }
+
+            glyph_variations.insert(
+                i as u16,
+                GlyphVariation {
+                    tuples: tuple_variations,
+                },
+            );
         }
 
         Ok(Self {
             major_version,
             minor_version,
-            glyph_variation: BTreeMap::new(),
+            glyph_variations,
         })
     }
 }
@@ -315,7 +326,6 @@ fn parse_packed_deltas(bytes: &[u8], count: usize) -> Result<Vec<[i16; 2]>, ImtE
             }
 
             if offset + 1 > bytes.len() {
-                println!("8");
                 return Err(TRUNCATED);
             }
 
@@ -328,7 +338,6 @@ fn parse_packed_deltas(bytes: &[u8], count: usize) -> Result<Vec<[i16; 2]>, ImtE
             remaining -= 1;
         } else if are_words {
             if offset + 2 > bytes.len() {
-                println!("7");
                 return Err(TRUNCATED);
             }
 
@@ -337,7 +346,6 @@ fn parse_packed_deltas(bytes: &[u8], count: usize) -> Result<Vec<[i16; 2]>, ImtE
             offset += 2;
         } else {
             if offset + 1 > bytes.len() {
-                println!("6");
                 return Err(TRUNCATED);
             }
 
@@ -349,6 +357,7 @@ fn parse_packed_deltas(bytes: &[u8], count: usize) -> Result<Vec<[i16; 2]>, ImtE
 
     debug_assert!(deltas.len() == count_x2);
     let y_deltas = deltas.split_off(count);
+
     Ok(deltas
         .into_iter()
         .zip(y_deltas.into_iter())
@@ -381,6 +390,7 @@ fn parse_packed_points(bytes: &[u8], points: &mut Vec<u16>) -> Result<usize, Imt
     points.reserve_exact(total);
     let mut remaining = 0;
     let mut points_are_words = false;
+    let mut last_point = 0;
 
     loop {
         if remaining == 0 {
@@ -404,7 +414,8 @@ fn parse_packed_points(bytes: &[u8], points: &mut Vec<u16>) -> Result<usize, Imt
                 return Err(TRUNCATED);
             }
 
-            points.push(read_u16(bytes, offset));
+            last_point += read_u16(bytes, offset);
+            points.push(last_point);
             offset += 2;
             remaining -= 1;
         } else {
@@ -412,7 +423,8 @@ fn parse_packed_points(bytes: &[u8], points: &mut Vec<u16>) -> Result<usize, Imt
                 return Err(TRUNCATED);
             }
 
-            points.push(bytes[offset] as u16);
+            last_point += bytes[offset] as u16;
+            points.push(last_point);
             offset += 1;
             remaining -= 1;
         }

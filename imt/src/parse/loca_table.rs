@@ -25,16 +25,9 @@ impl LocaTable {
                 }
 
                 let mut offsets = Vec::with_capacity(num_glyphs + 1);
-                let last_offset = read_u16(bytes, table_offset + (num_glyphs * 2)) as u32 * 2;
 
                 for i in 0..=num_glyphs {
-                    let offset = read_u16(bytes, table_offset + (i * 2)) as u32 * 2;
-
-                    if offset == last_offset {
-                        break;
-                    }
-
-                    offsets.push(offset);
+                    offsets.push(read_u16(bytes, table_offset + (i * 2)) as u32 * 2);
                 }
 
                 Ok(Self {
@@ -50,16 +43,9 @@ impl LocaTable {
                 }
 
                 let mut offsets = Vec::with_capacity(num_glyphs + 1);
-                let last_offset = read_u32(bytes, table_offset + (num_glyphs * 4));
 
                 for i in 0..=num_glyphs {
-                    let offset = read_u32(bytes, table_offset + (i * 4));
-
-                    if offset == last_offset {
-                        break;
-                    }
-
-                    offsets.push(offset);
+                    offsets.push(read_u32(bytes, table_offset + (i * 4)));
                 }
 
                 Ok(Self {

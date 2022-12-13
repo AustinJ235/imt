@@ -190,8 +190,20 @@ impl GlyfTable {
     ) -> Result<Self, ImtError> {
         let mut outlines = BTreeMap::new();
 
-        for (i, glyph_offset) in loca_table.offsets.iter().enumerate() {
-            let glyph_offset = table_offset + *glyph_offset as usize;
+        if loca_table.offsets.len() < 2 {
+            return Err(ImtError {
+                kind: ImtErrorKind::Malformed,
+                source: ImtErrorSource::LocaTable,
+            });
+        }
+
+        for i in 0..(loca_table.offsets.len() - 1) {
+            if loca_table.offsets[i] == loca_table.offsets[i + 1] {
+                // No Outline
+                continue;
+            }
+
+            let glyph_offset = table_offset + loca_table.offsets[i] as usize;
 
             if glyph_offset + 10 > bytes.len() {
                 return Err(ImtError {
