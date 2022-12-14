@@ -77,11 +77,81 @@ pub fn outline_apply_gvar(
         .get(&glyph_index)
         .ok_or(ImtUtilError::NoData)?;
 
-    let mut point_deltas = vec![0.0; outline.num_packed_points];
+    let mut point_deltas = vec![[0.0, 0.0]; outline.num_packed_points + 4];
 
-    for tuple in glyph_variation.tuples.iter() {
-        for (axis_i, axis_coord) in coords.iter().enumerate() {}
+    'tuple: for tuple in glyph_variation.tuples.iter() {
+        let mut tuple_scaler = 1.0;
+        let mut tuple_applies = false;
+
+        for (axis_i, axis_coord) in coords.iter().enumerate() {
+            let peak = tuple.peak[0];
+
+            // If the peak is at zero it is ignored.
+            if peak == 0.0 {
+                continue;
+            }
+
+            // If the axis coord equals the peak the scaler is one
+            if peak == *axis_coord {
+                tuple_applies = true;
+                continue;
+            }
+
+            if let Some(interm) = &tuple.interm {
+                let start = interm.start[axis_i];
+                let end = interm.end[axis_i];
+
+                // Out of range
+                if *axis_coord < start || *axis_coord > end {
+                    continue 'tuple;
+                }
+
+                // Scaler will be zero
+                if *axis_coord == start || *axis_coord == end {
+                    continue 'tuple;
+                }
+
+                tuple_applies = true;
+
+                if *axis_coord < peak {
+                    tuple_scaler *= (*axis_coord - start) / (peak - start);
+                } else {
+                    tuple_scaler *= (end - *axis_coord) / (end - peak);
+                }
+            } else {
+                // Out of range
+                if *axis_coord == 0.0 || *axis_coord < peak.min(0.0) || *axis_coord > peak.max(0.0)
+                {
+                    continue 'tuple;
+                }
+
+                tuple_applies = true;
+                tuple_scaler *= *axis_coord / peak;
+            }
+        }
+
+        // All axes were ignored, so delta does not apply
+        if !tuple_applies {
+            continue;
+        }
+
+        if tuple.points.is_empty() {
+            for (i, [x, y]) in tuple.deltas.iter().enumerate() {
+                point_deltas[i][0] += *x as f32 * tuple_scaler;
+                point_deltas[i][1] += *y as f32 * tuple_scaler;
+            }
+        } else {
+            // TODO: Interpolate
+
+            for (i, [x, y]) in tuple.points.iter().zip(tuple.deltas.iter()) {
+                point_deltas[*i as usize][0] += *x as f32 * tuple_scaler;
+                point_deltas[*i as usize][1] += *y as f32 * tuple_scaler;
+            }
+        }
     }
 
-    todo!()
+    println!("Deltas: {:?}", point_deltas);
+
+    // TODO: Apply deltas
+    Ok(())
 }

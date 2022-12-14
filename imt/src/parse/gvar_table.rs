@@ -168,8 +168,6 @@ impl GvarTable {
             let mut tuple_variations: Vec<TupleVariation> =
                 Vec::with_capacity(tuple_variation_count);
 
-            println!("{}", tuple_variation_count);
-
             for _ in 0..tuple_variation_count {
                 if tuple_variation_header_offset + 4 > glyph_variation_data.len() {
                     return Err(TRUNCATED);
@@ -285,6 +283,38 @@ impl GvarTable {
                 )?;
 
                 serialized_offset += variation_data_size;
+
+                // Sanity Checks
+
+                if let Some(interm) = intermediate_tuples.as_ref() {
+                    for (p, (s, e)) in peak_tuple
+                        .iter()
+                        .zip(interm.start.iter().zip(interm.end.iter()))
+                    {
+                        if *s > *e
+                            || *p < *s
+                            || *p > *e
+                            || *s < -1.0
+                            || *s > 1.0
+                            || *e < -1.0
+                            || *e > 1.0
+                        {
+                            return Err(MALFORMED);
+                        }
+                    }
+                }
+
+                for p in peak_tuple.iter() {
+                    if *p < -1.0 || *p > 1.0 {
+                        return Err(MALFORMED);
+                    }
+                }
+
+                for point in point_numbers.iter() {
+                    if *point as usize >= outline.num_packed_points + 4 {
+                        return Err(MALFORMED);
+                    }
+                }
 
                 tuple_variations.push(TupleVariation {
                     peak: peak_tuple,

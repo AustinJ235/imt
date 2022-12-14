@@ -18,7 +18,6 @@ fn main() {
             let basalt = basalt_res.unwrap();
             let roboto = include_bytes!("../../imt/src/RobotoFlex.ttf");
             let font = imt::parse::Font::from_bytes(roboto).unwrap();
-
             let fvar = font.fvar_table().unwrap();
 
             for axis in fvar.axes.iter() {
@@ -38,6 +37,12 @@ fn main() {
                     "Axis '{}', Min: {}, Default: {}, Max: {}",
                     name.name, axis.min_value, axis.default_value, axis.max_value
                 );
+            }
+
+            {
+                let mut outline = font.glyf_table().outlines.get(&42).unwrap().clone();
+                let coords = vec![0.0; 13];
+                imt::util::variation::outline_apply_gvar(&font, 42, &mut outline, &coords).unwrap();
             }
 
             let mut bins = Vec::new();
