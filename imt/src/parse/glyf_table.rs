@@ -125,6 +125,7 @@ pub struct OutlinePoint {
     pub x: f32,
     pub y: f32,
     pub control: bool,
+    pub packed_index: Option<u16>,
 }
 
 impl OutlinePoint {
@@ -386,18 +387,21 @@ impl GlyfTable {
                                 x: x_coordinates[k] as f32,
                                 y: y_coordinates[k] as f32,
                                 control: true,
+                                packed_index: Some(k as u16),
                             });
 
                             points.push(OutlinePoint {
                                 x: (x_coordinates[k] as f32 + x_coordinates[k + 1] as f32) / 2.0,
                                 y: (y_coordinates[k] as f32 + y_coordinates[k + 1] as f32) / 2.0,
                                 control: false,
+                                packed_index: None,
                             });
                         } else {
                             points.push(OutlinePoint {
                                 x: x_coordinates[k] as f32,
                                 y: y_coordinates[k] as f32,
                                 control: !flags[k].on_curve_point(),
+                                packed_index: Some(k as u16),
                             });
                         }
                     }

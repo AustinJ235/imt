@@ -9,6 +9,7 @@ use crate::parse::{read_f2dot14, read_u16, read_u32, GlyfTable};
 pub struct GvarTable {
     pub major_version: u16,
     pub minor_version: u16,
+    pub axis_count: usize,
     pub glyph_variations: BTreeMap<u16, GlyphVariation>,
 }
 
@@ -167,6 +168,8 @@ impl GvarTable {
             let mut tuple_variations: Vec<TupleVariation> =
                 Vec::with_capacity(tuple_variation_count);
 
+            println!("{}", tuple_variation_count);
+
             for _ in 0..tuple_variation_count {
                 if tuple_variation_header_offset + 4 > glyph_variation_data.len() {
                     return Err(TRUNCATED);
@@ -302,6 +305,7 @@ impl GvarTable {
         Ok(Self {
             major_version,
             minor_version,
+            axis_count,
             glyph_variations,
         })
     }

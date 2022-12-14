@@ -1,6 +1,6 @@
 use crate::parse::*;
 
-// TODO: Tables not currently parsed in RobotoFlex: GDEF, GPOS, GSUB, HVAR, OS/2, STAT, avar,
+// TODO: Tables not currently parsed in RobotoFlex: GDEF, GPOS, GSUB, HVAR, OS/2, STAT,
 //       gasp, post, prep
 
 #[derive(Debug, Clone)]

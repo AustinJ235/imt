@@ -21,7 +21,7 @@ pub use avar_table::{AvarTable, AxisValueMap, SegmentMap};
 pub use cmap_table::{CmapSubtable, CmapTable, EncodingRecord};
 pub use font::Font;
 pub use fvar_table::{FvarTable, InstanceRecord, VariationAxisRecord};
-pub use glyf_table::GlyfTable;
+pub use glyf_table::{GlyfTable, Outline, OutlineCurve, OutlinePoint, OutlineSegment};
 pub use gvar_table::GvarTable;
 pub use head_table::HeadTable;
 pub use hhea_table::HheaTable;
