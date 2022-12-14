@@ -17,7 +17,13 @@ fn main() {
         Box::new(move |basalt_res| {
             let basalt = basalt_res.unwrap();
             let roboto = include_bytes!("../../imt/src/RobotoFlex.ttf");
+            let mut start = Instant::now();
             let font = imt::parse::Font::from_bytes(roboto).unwrap();
+
+            println!(
+                "Time to Parse: {} ms",
+                start.elapsed().as_micros() as f32 / 1000.0
+            );
             let fvar = font.fvar_table().unwrap();
 
             for axis in fvar.axes.iter() {
@@ -51,7 +57,7 @@ fn main() {
             let max_y = (font.head_table().y_max as f32 * scaler).ceil();
 
             let rasterizer = imt::raster::gpu::GpuRasterizer::new(basalt.compute_queue());
-            let mut start = Instant::now();
+            start = Instant::now();
 
             for c in TEXT.chars() {
                 let index = font.cmap_table().encoding_records[0]

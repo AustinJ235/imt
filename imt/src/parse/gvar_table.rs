@@ -298,6 +298,9 @@ impl GvarTable {
                             || *s > 1.0
                             || *e < -1.0
                             || *e > 1.0
+                            // must both be non-negative or non-positive
+                            || (*s > 0.0 && *e < 0.0)
+                            || (*s < 0.0 && *e > 0.0)
                         {
                             return Err(MALFORMED);
                         }
