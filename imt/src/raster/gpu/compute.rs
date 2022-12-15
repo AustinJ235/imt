@@ -10,7 +10,7 @@ use vulkano::image::{ImageCreateFlags, ImageDimensions, ImageUsage, StorageImage
 use vulkano::pipeline::{Pipeline, PipelineBindPoint};
 use vulkano::sync::GpuFuture;
 
-use crate::parse::{Font, OutlineGeometry};
+use crate::parse::{Font, Outline, OutlineGeometry};
 use crate::raster::gpu::image_view::ImtImageView;
 use crate::raster::gpu::shaders::nonzero_cs;
 use crate::raster::gpu::GpuRasterizer;
@@ -24,17 +24,10 @@ pub struct ComputeGlyphRender {
 
 pub fn raster(
     font: &Font,
-    glyph_index: u16,
+    outline: &Outline,
     size: f32,
     rasterizer: &GpuRasterizer,
 ) -> ComputeGlyphRender {
-    let outline = font
-        .glyf_table()
-        .outlines
-        .get(&glyph_index)
-        .unwrap()
-        .clone();
-
     let scaler = (1.0 / font.head_table().units_per_em as f32) * size;
     let width_f = (outline.x_max - outline.x_min) * scaler;
     let width_r = width_f.ceil();

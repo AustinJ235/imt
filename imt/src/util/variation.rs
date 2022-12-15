@@ -16,14 +16,15 @@ pub fn normalize_axis_coords(font: &Font, coords: &mut Vec<f32>) -> Result<(), I
             return Err(ImtUtilError::InvalidCoords);
         }
 
-        *coord = if *coord < fvar.axes[i].default_value {
-            (*coord - fvar.axes[i].default_value)
-                / (fvar.axes[i].default_value - fvar.axes[i].min_value)
+        if *coord < fvar.axes[i].default_value {
+            *coord = (*coord - fvar.axes[i].default_value)
+                / (fvar.axes[i].default_value - fvar.axes[i].min_value);
         } else if *coord > fvar.axes[i].default_value {
-            (*coord - fvar.axes[i].default_value)
-                / (fvar.axes[i].max_value - fvar.axes[i].default_value)
+            *coord = (*coord - fvar.axes[i].default_value)
+                / (fvar.axes[i].max_value - fvar.axes[i].default_value);
         } else {
-            0.0
+            *coord = 0.0;
+            continue;
         };
 
         if let Some(avar) = font.avar_table() {
@@ -89,7 +90,7 @@ pub fn outline_apply_gvar(
             let peak = tuple.peak[0];
 
             // If the peak is at zero it is ignored.
-            if peak == 0.0 {
+            if peak == 0.0 || *axis_coord == 0.0 {
                 continue;
             }
 
@@ -122,8 +123,7 @@ pub fn outline_apply_gvar(
                 }
             } else {
                 // Out of range
-                if *axis_coord == 0.0 || *axis_coord < peak.min(0.0) || *axis_coord > peak.max(0.0)
-                {
+                if *axis_coord < peak.min(0.0) || *axis_coord > peak.max(0.0) {
                     continue 'tuple;
                 }
 
@@ -217,6 +217,9 @@ pub fn outline_apply_gvar(
     }
 
     for (i, [dx, dy]) in point_deltas.into_iter().enumerate() {
+        // TODO: Should these be retained in case of the 'hvar' table is missing? The code above
+        //       will have to infer these also.
+
         // Phantom points are ignored
         if i >= outline.points.len() {
             break;

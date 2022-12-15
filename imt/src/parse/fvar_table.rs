@@ -87,6 +87,8 @@ impl FvarTable {
                 axis_count,
                 instance_size == size_with_ps_name,
             ));
+
+            record_offset += instance_size;
         }
 
         Ok(Self {
