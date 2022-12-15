@@ -1,3 +1,5 @@
+use std::cmp::Ord;
+
 use crate::parse::{Font, Outline};
 use crate::util::ImtUtilError;
 
@@ -141,17 +143,119 @@ pub fn outline_apply_gvar(
                 point_deltas[i][1] += *y as f32 * tuple_scaler;
             }
         } else {
-            // TODO: Interpolate
+            for range in outline.contours.clone() {
+                // (Delta/Point Index, Outline Point Index)
+                let points_in_range: Vec<(usize, usize)> = tuple
+                    .points
+                    .iter()
+                    .enumerate()
+                    .map(|(i, j)| (i, *j as usize))
+                    .filter(|(_, j)| range.contains(j))
+                    .collect();
 
-            for (i, [x, y]) in tuple.points.iter().zip(tuple.deltas.iter()) {
-                point_deltas[*i as usize][0] += *x as f32 * tuple_scaler;
-                point_deltas[*i as usize][1] += *y as f32 * tuple_scaler;
+                // No deltas for this contour
+                if points_in_range.is_empty() {
+                    continue;
+                }
+
+                // All deltas are the same
+                if points_in_range.len() == 1 {
+                    let dx = tuple.deltas[points_in_range[0].0][0] as f32 * tuple_scaler;
+                    let dy = tuple.deltas[points_in_range[0].0][1] as f32 * tuple_scaler;
+
+                    for i in range {
+                        point_deltas[i][0] += dx;
+                        point_deltas[i][1] += dy;
+                    }
+
+                    continue;
+                }
+
+                // Interpolation
+                for i in range {
+                    match points_in_range.binary_search_by(|(_, j)| j.cmp(&i)) {
+                        // Explicit Delta
+                        Ok(pir_i) => {
+                            let delta_i = points_in_range[pir_i].0;
+                            point_deltas[i][0] += tuple.deltas[delta_i][0] as f32 * tuple_scaler;
+                            point_deltas[i][1] += tuple.deltas[delta_i][1] as f32 * tuple_scaler;
+                        },
+                        // Inferred Delta
+                        Err(pir_i) => {
+                            let (prec_pir_i, foll_pir_i) =
+                                if pir_i == 0 || pir_i == points_in_range.len() {
+                                    (points_in_range.len() - 1, 0)
+                                } else {
+                                    (pir_i - 1, pir_i)
+                                };
+
+                            let (prec_delta_i, prec_point_i) = points_in_range[prec_pir_i];
+                            let (foll_delta_i, foll_point_i) = points_in_range[foll_pir_i];
+
+                            // X & Y Deltas are treated seperate
+
+                            point_deltas[i][0] += infer_delta(
+                                outline.points[prec_point_i].x,
+                                outline.points[i].x,
+                                outline.points[foll_point_i].x,
+                                tuple.deltas[prec_delta_i][0] as f32,
+                                tuple.deltas[foll_delta_i][0] as f32,
+                            ) * tuple_scaler;
+
+                            point_deltas[i][1] += infer_delta(
+                                outline.points[prec_point_i].y,
+                                outline.points[i].y,
+                                outline.points[foll_point_i].y,
+                                tuple.deltas[prec_delta_i][1] as f32,
+                                tuple.deltas[foll_delta_i][1] as f32,
+                            ) * tuple_scaler;
+                        },
+                    }
+                }
             }
         }
     }
 
-    println!("Deltas: {:?}", point_deltas);
+    for (i, [dx, dy]) in point_deltas.into_iter().enumerate() {
+        // Phantom points are ignored
+        if i >= outline.points.len() {
+            break;
+        }
 
-    // TODO: Apply deltas
-    Ok(())
+        outline.points[i].x += dx;
+        outline.points[i].y += dy;
+    }
+
+    outline
+        .rebuild()
+        .map_err(|_| ImtUtilError::MalformedOutline)
+}
+
+// impl pseudo-code from:
+// https://learn.microsoft.com/en-us/typography/opentype/spec/gvar#inferred-deltas-for-un-referenced-point-numbers
+fn infer_delta(px: f32, tx: f32, fx: f32, pd: f32, fd: f32) -> f32 {
+    if px == fx {
+        if pd == fd {
+            pd
+        } else {
+            0.0
+        }
+    } else {
+        if tx <= px.min(fx) {
+            if px < fx {
+                pd
+            } else {
+                fd
+            }
+        } else if tx >= px.max(fx) {
+            if px > fx {
+                pd
+            } else {
+                fd
+            }
+        } else {
+            let p = (tx - px) / (fx - px);
+            ((1.0 - p) * pd) + (p * fd)
+        }
+    }
 }

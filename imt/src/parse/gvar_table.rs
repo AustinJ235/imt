@@ -311,10 +311,20 @@ impl GvarTable {
                     }
                 }
 
+                let mut last_point_op = None;
+
                 for point in point_numbers.iter() {
                     if *point as usize >= outline.points.len() + 4 {
                         return Err(MALFORMED);
                     }
+
+                    if let Some(last_point) = last_point_op {
+                        if *point <= last_point {
+                            return Err(MALFORMED);
+                        }
+                    }
+
+                    last_point_op = Some(*point);
                 }
 
                 tuple_variations.push(TupleVariation {

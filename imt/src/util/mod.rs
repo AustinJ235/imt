@@ -6,4 +6,5 @@ pub enum ImtUtilError {
     InvalidCoords,
     MissingTable,
     MalformedFont,
+    MalformedOutline,
 }
