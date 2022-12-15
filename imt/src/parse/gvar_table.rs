@@ -260,9 +260,7 @@ impl GvarTable {
                     0
                 };
 
-                if point_numbers.last().copied().unwrap_or(0) as usize
-                    > outline.num_packed_points + 4
-                {
+                if point_numbers.last().copied().unwrap_or(0) as usize > outline.points.len() + 4 {
                     return Err(MALFORMED);
                 }
 
@@ -271,7 +269,7 @@ impl GvarTable {
                 }
 
                 let delta_count = if point_numbers.is_empty() {
-                    outline.num_packed_points + 4
+                    outline.points.len() + 4
                 } else {
                     point_numbers.len()
                 };
@@ -314,7 +312,7 @@ impl GvarTable {
                 }
 
                 for point in point_numbers.iter() {
-                    if *point as usize >= outline.num_packed_points + 4 {
+                    if *point as usize >= outline.points.len() + 4 {
                         return Err(MALFORMED);
                     }
                 }

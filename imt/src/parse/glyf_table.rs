@@ -1,7 +1,18 @@
 use std::collections::BTreeMap;
+use std::ops::Range;
 
 use crate::error::*;
 use crate::parse::{read_i16, read_u16, LocaTable};
+
+const MALFORMED: ImtError = ImtError {
+    kind: ImtErrorKind::Malformed,
+    source: ImtErrorSource::GlyfTable,
+};
+
+const TRUNCATED: ImtError = ImtError {
+    kind: ImtErrorKind::Truncated,
+    source: ImtErrorSource::GlyfTable,
+};
 
 #[derive(Debug, Clone)]
 pub struct GlyfTable {
@@ -10,128 +21,174 @@ pub struct GlyfTable {
 
 #[derive(Debug, Clone)]
 pub struct Outline {
-    pub x_min: i16,
-    pub y_min: i16,
-    pub x_max: i16,
-    pub y_max: i16,
-    pub contours: Vec<OutlineContour>,
-    /// The number of points before they were unpacked.
-    pub num_packed_points: usize,
-}
-
-impl Outline {
-    pub fn scale(&mut self, scale: f32) {
-        // TODO: Adjust Bounding Box
-        self.contours
-            .iter_mut()
-            .for_each(|contour| contour.scale(scale));
-    }
-
-    pub fn points(&self) -> impl Iterator<Item = &OutlinePoint> {
-        self.contours
-            .iter()
-            .flat_map(|contour| contour.points.iter())
-    }
-
-    pub fn points_mut(&mut self) -> impl Iterator<Item = &mut OutlinePoint> {
-        self.contours
-            .iter_mut()
-            .flat_map(|contour| contour.points.iter_mut())
-    }
-
-    pub fn curves(&self) -> impl Iterator<Item = &OutlineCurve> {
-        self.contours
-            .iter()
-            .flat_map(|contour| contour.curves.iter())
-    }
-
-    pub fn curves_mut(&mut self) -> impl Iterator<Item = &mut OutlineCurve> {
-        self.contours
-            .iter_mut()
-            .flat_map(|contour| contour.curves.iter_mut())
-    }
-
-    pub fn segments(&self) -> impl Iterator<Item = &OutlineSegment> {
-        self.contours
-            .iter()
-            .flat_map(|contour| contour.segments.iter())
-    }
-
-    pub fn segments_mut(&mut self) -> impl Iterator<Item = &mut OutlineSegment> {
-        self.contours
-            .iter_mut()
-            .flat_map(|contour| contour.segments.iter_mut())
-    }
+    pub x_min: f32,
+    pub y_min: f32,
+    pub x_max: f32,
+    pub y_max: f32,
+    /// Raw points parsed from font data.
+    pub points: Vec<OutlineRawPoint>,
+    /// Ranges in points that belong to a specific contour
+    pub contours: Vec<Range<usize>>,
+    /// Points that have been processed into segments and curves
+    pub geometry: Vec<OutlineGeometry>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct OutlineContour {
-    pub points: Vec<OutlinePoint>,
-    pub curves: Vec<OutlineCurve>,
-    pub segments: Vec<OutlineSegment>,
+pub enum OutlineGeometry {
+    Segment {
+        p1: OutlinePoint,
+        p2: OutlinePoint,
+    },
+    QuadraticCurve {
+        p1: OutlinePoint,
+        p2: OutlinePoint,
+        p3: OutlinePoint,
+    },
 }
 
-impl OutlineContour {
-    pub fn scale(&mut self, scale: f32) {
-        self.points.iter_mut().for_each(|point| point.scale(scale));
-        self.curves.iter_mut().for_each(|curve| curve.scale(scale));
-        self.segments
-            .iter_mut()
-            .for_each(|segment| segment.scale(scale));
+impl OutlineGeometry {
+    pub fn is_curve(&self) -> bool {
+        matches!(self, Self::QuadraticCurve { .. })
+    }
+
+    pub fn evaluate(&self, t: f32) -> OutlinePoint {
+        match self {
+            Self::Segment {
+                p1,
+                p2,
+            } => {
+                OutlinePoint {
+                    x: (t * (p2.x - p1.x)) + p1.x,
+                    y: (t * (p2.y - p1.y)) + p1.y,
+                }
+            },
+            Self::QuadraticCurve {
+                p1,
+                p2,
+                p3,
+            } => {
+                OutlinePoint {
+                    x: ((1.0 - t).powi(2) * p1.x)
+                        + (2.0 * (1.0 - t) * t * p2.x)
+                        + (t.powi(2) * p3.x),
+                    y: ((1.0 - t).powi(2) * p1.y)
+                        + (2.0 * (1.0 - t) * t * p2.y)
+                        + (t.powi(2) * p3.y),
+                }
+            },
+        }
     }
 }
 
+/// A struct referencing the raw point parsed from font data.
 #[derive(Debug, Clone, PartialEq)]
-pub struct OutlineCurve {
-    pub p1: OutlinePoint,
-    pub p2: OutlinePoint,
-    pub p3: OutlinePoint,
-}
-
-impl OutlineCurve {
-    pub fn scale(&mut self, scale: f32) {
-        self.p1.scale(scale);
-        self.p2.scale(scale);
-        self.p3.scale(scale);
-    }
-
-    pub fn evaluate(&self, t: f32) -> [f32; 2] {
-        [
-            ((1.0 - t).powi(2) * self.p1.x)
-                + (2.0 * (1.0 - t) * t * self.p2.x)
-                + (t.powi(2) * self.p3.x),
-            ((1.0 - t).powi(2) * self.p1.y)
-                + (2.0 * (1.0 - t) * t * self.p2.y)
-                + (t.powi(2) * self.p3.y),
-        ]
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct OutlineSegment {
-    pub p1: OutlinePoint,
-    pub p2: OutlinePoint,
-}
-
-impl OutlineSegment {
-    pub fn scale(&mut self, scale: f32) {
-        self.p1.scale(scale);
-        self.p2.scale(scale);
-    }
+pub struct OutlineRawPoint {
+    /// Index of the contour
+    pub c: u16,
+    pub x: f32,
+    pub y: f32,
+    /// Whether or not this is a control point.
+    pub control: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct OutlinePoint {
     pub x: f32,
     pub y: f32,
-    pub control: bool,
-    pub packed_index: Option<u16>,
 }
 
-impl OutlinePoint {
-    pub fn scale(&mut self, scale: f32) {
-        self.x *= scale;
-        self.y *= scale;
+impl Outline {
+    pub(crate) fn rebuild(&mut self) -> Result<(), ImtError> {
+        let mut x_min = f32::INFINITY;
+        let mut x_max = f32::NEG_INFINITY;
+        let mut y_min = f32::INFINITY;
+        let mut y_max = f32::NEG_INFINITY;
+        let mut geometry = Vec::new();
+
+        for range in self.contours.iter().cloned() {
+            if range.len() < 3 || self.points[range.start].control {
+                return Err(MALFORMED);
+            }
+
+            let mut points = Vec::new();
+
+            for i in range.clone() {
+                points.push((self.points[i].x, self.points[i].y, self.points[i].control));
+
+                if i != range.start
+                    && i != range.end - 1
+                    && self.points[i].control
+                    && self.points[i + 1].control
+                {
+                    points.push((
+                        (self.points[i].x + self.points[i + 1].x) / 2.0,
+                        (self.points[i].y + self.points[i + 1].y) / 2.0,
+                        false,
+                    ));
+                }
+            }
+
+            for point in points.iter() {
+                if point.0 < x_min {
+                    x_min = point.0;
+                }
+
+                if point.0 > x_max {
+                    x_max = point.0;
+                }
+
+                if point.1 < y_min {
+                    y_min = point.1;
+                }
+
+                if point.1 > y_max {
+                    y_max = point.1;
+                }
+            }
+
+            let mut contour_geo = Vec::new();
+
+            for i in 0..points.len() {
+                let j = (i + 1) % points.len();
+
+                if points[i].2 {
+                    contour_geo.push(OutlineGeometry::QuadraticCurve {
+                        p1: OutlinePoint {
+                            x: points[i - 1].0,
+                            y: points[i - 1].1,
+                        },
+                        p2: OutlinePoint {
+                            x: points[i].0,
+                            y: points[i].1,
+                        },
+                        p3: OutlinePoint {
+                            x: points[j].0,
+                            y: points[j].1,
+                        },
+                    });
+                } else if !points[j].2 {
+                    contour_geo.push(OutlineGeometry::Segment {
+                        p1: OutlinePoint {
+                            x: points[i].0,
+                            y: points[i].1,
+                        },
+                        p2: OutlinePoint {
+                            x: points[j].0,
+                            y: points[j].1,
+                        },
+                    });
+                }
+            }
+
+            geometry.append(&mut contour_geo);
+        }
+
+        self.x_min = x_min;
+        self.x_max = x_max;
+        self.y_min = y_min;
+        self.y_max = y_max;
+        self.geometry = geometry;
+        Ok(())
     }
 }
 
@@ -192,10 +249,7 @@ impl GlyfTable {
         let mut outlines = BTreeMap::new();
 
         if loca_table.offsets.len() < 2 {
-            return Err(ImtError {
-                kind: ImtErrorKind::Malformed,
-                source: ImtErrorSource::LocaTable,
-            });
+            return Err(MALFORMED);
         }
 
         for i in 0..(loca_table.offsets.len() - 1) {
@@ -207,27 +261,18 @@ impl GlyfTable {
             let glyph_offset = table_offset + loca_table.offsets[i] as usize;
 
             if glyph_offset + 10 > bytes.len() {
-                return Err(ImtError {
-                    kind: ImtErrorKind::Truncated,
-                    source: ImtErrorSource::GlyfTable,
-                });
+                return Err(TRUNCATED);
             }
 
             let number_of_contours = read_i16(bytes, glyph_offset);
-            let x_min = read_i16(bytes, glyph_offset + 2);
-            let y_min = read_i16(bytes, glyph_offset + 4);
-            let x_max = read_i16(bytes, glyph_offset + 6);
-            let y_max = read_i16(bytes, glyph_offset + 8);
+            // Bytes +2 to +10 contain the bounding box. It is automatically computed, so ignored.
 
             if number_of_contours > 0 {
                 let number_of_contours = number_of_contours as usize;
                 let end_pts_of_contours_end_offset = glyph_offset + 10 + (number_of_contours * 2);
 
                 if end_pts_of_contours_end_offset + 2 > bytes.len() {
-                    return Err(ImtError {
-                        kind: ImtErrorKind::Truncated,
-                        source: ImtErrorSource::GlyfTable,
-                    });
+                    return Err(TRUNCATED);
                 }
 
                 let mut end_pts_of_contours = Vec::with_capacity(number_of_contours);
@@ -245,10 +290,7 @@ impl GlyfTable {
 
                 while flags.len() < number_of_points {
                     if flag_offset >= bytes.len() {
-                        return Err(ImtError {
-                            kind: ImtErrorKind::Truncated,
-                            source: ImtErrorSource::GlyfTable,
-                        });
+                        return Err(TRUNCATED);
                     }
 
                     let flag = SimpleFlags(bytes[flag_offset]);
@@ -257,10 +299,7 @@ impl GlyfTable {
 
                     if flag.repeat_flag() {
                         if flag_offset >= bytes.len() {
-                            return Err(ImtError {
-                                kind: ImtErrorKind::Truncated,
-                                source: ImtErrorSource::GlyfTable,
-                            });
+                            return Err(TRUNCATED);
                         }
 
                         flag_count = bytes[flag_offset] + 1;
@@ -279,10 +318,7 @@ impl GlyfTable {
                 for flag in flags.iter() {
                     if flag.x_short_vector() {
                         if coordinate_offset >= bytes.len() {
-                            return Err(ImtError {
-                                kind: ImtErrorKind::Truncated,
-                                source: ImtErrorSource::GlyfTable,
-                            });
+                            return Err(TRUNCATED);
                         }
 
                         let dx = if flag.x_is_same_or_positive_x_short_vector() {
@@ -300,10 +336,7 @@ impl GlyfTable {
                             x_coordinates.push(previous_x);
                         } else {
                             if coordinate_offset + 2 > bytes.len() {
-                                return Err(ImtError {
-                                    kind: ImtErrorKind::Truncated,
-                                    source: ImtErrorSource::GlyfTable,
-                                });
+                                return Err(TRUNCATED);
                             }
 
                             let dx = read_i16(bytes, coordinate_offset);
@@ -321,10 +354,7 @@ impl GlyfTable {
                 for flag in flags.iter() {
                     if flag.y_short_vector() {
                         if coordinate_offset >= bytes.len() {
-                            return Err(ImtError {
-                                kind: ImtErrorKind::Truncated,
-                                source: ImtErrorSource::GlyfTable,
-                            });
+                            return Err(TRUNCATED);
                         }
 
                         let dy = if flag.y_is_same_or_positive_y_short_vector() {
@@ -342,10 +372,7 @@ impl GlyfTable {
                             y_coordinates.push(previous_y);
                         } else {
                             if coordinate_offset + 2 > bytes.len() {
-                                return Err(ImtError {
-                                    kind: ImtErrorKind::Truncated,
-                                    source: ImtErrorSource::GlyfTable,
-                                });
+                                return Err(TRUNCATED);
                             }
 
                             let dy = read_i16(bytes, coordinate_offset);
@@ -357,6 +384,7 @@ impl GlyfTable {
                     }
                 }
 
+                let mut points = Vec::with_capacity(flags.len());
                 let mut contours = Vec::with_capacity(number_of_contours);
 
                 for j in 0..number_of_contours {
@@ -369,101 +397,37 @@ impl GlyfTable {
                     let range_end = end_pts_of_contours[j] + 1;
 
                     if range_start >= range_end {
-                        return Err(ImtError {
-                            kind: ImtErrorKind::Malformed,
-                            source: ImtErrorSource::GlyfTable,
-                        });
+                        return Err(MALFORMED);
                     }
 
-                    let mut points = Vec::new();
+                    contours.push(range_start..range_end);
 
                     for k in range_start..range_end {
-                        if k > range_start
-                            && k < range_end - 1
-                            && !flags[k].on_curve_point()
-                            && !flags[k + 1].on_curve_point()
-                        {
-                            points.push(OutlinePoint {
-                                x: x_coordinates[k] as f32,
-                                y: y_coordinates[k] as f32,
-                                control: true,
-                                packed_index: Some(k as u16),
-                            });
-
-                            points.push(OutlinePoint {
-                                x: (x_coordinates[k] as f32 + x_coordinates[k + 1] as f32) / 2.0,
-                                y: (y_coordinates[k] as f32 + y_coordinates[k + 1] as f32) / 2.0,
-                                control: false,
-                                packed_index: None,
-                            });
-                        } else {
-                            points.push(OutlinePoint {
-                                x: x_coordinates[k] as f32,
-                                y: y_coordinates[k] as f32,
-                                control: !flags[k].on_curve_point(),
-                                packed_index: Some(k as u16),
-                            });
-                        }
+                        points.push(OutlineRawPoint {
+                            c: j as u16,
+                            x: x_coordinates[k] as f32,
+                            y: y_coordinates[k] as f32,
+                            control: !flags[k].on_curve_point(),
+                        });
                     }
-
-                    let mut segments = Vec::new();
-                    let mut curves = Vec::new();
-
-                    for k in 0..points.len() {
-                        if points[k].control {
-                            if k == 0 {
-                                return Err(ImtError {
-                                    kind: ImtErrorKind::Malformed,
-                                    source: ImtErrorSource::GlyfTable,
-                                });
-                            } else if k + 1 >= points.len() {
-                                curves.push(OutlineCurve {
-                                    p1: points[k - 1].clone(),
-                                    p2: points[k].clone(),
-                                    p3: points[0].clone(),
-                                });
-                            } else {
-                                curves.push(OutlineCurve {
-                                    p1: points[k - 1].clone(),
-                                    p2: points[k].clone(),
-                                    p3: points[k + 1].clone(),
-                                });
-                            }
-                        } else {
-                            let l = (k + 1) % points.len();
-
-                            if l == k {
-                                return Err(ImtError {
-                                    kind: ImtErrorKind::Malformed,
-                                    source: ImtErrorSource::GlyfTable,
-                                });
-                            }
-
-                            if !points[l].control {
-                                segments.push(OutlineSegment {
-                                    p1: points[k].clone(),
-                                    p2: points[l].clone(),
-                                });
-                            }
-                        }
-                    }
-
-                    contours.push(OutlineContour {
-                        points,
-                        curves,
-                        segments,
-                    });
                 }
 
-                let outline = Outline {
-                    x_min,
-                    y_min,
-                    x_max,
-                    y_max,
+                if x_coordinates.len() != y_coordinates.len() || x_coordinates.len() != points.len()
+                {
+                    return Err(MALFORMED);
+                }
+
+                let mut outline = Outline {
+                    x_min: 0.0,
+                    y_min: 0.0,
+                    x_max: 0.0,
+                    y_max: 0.0,
+                    points,
                     contours,
-                    num_packed_points: number_of_points,
+                    geometry: Vec::new(),
                 };
 
+                outline.rebuild()?;
                 outlines.insert(i as u16, outline);
             } else if number_of_contours < 0 {
                 // TODO: Composite

@@ -10,7 +10,7 @@ use vulkano::image::{ImageCreateFlags, ImageDimensions, ImageUsage, StorageImage
 use vulkano::pipeline::{Pipeline, PipelineBindPoint};
 use vulkano::sync::GpuFuture;
 
-use crate::parse::Font;
+use crate::parse::{Font, OutlineGeometry};
 use crate::raster::gpu::image_view::ImtImageView;
 use crate::raster::gpu::shaders::nonzero_cs;
 use crate::raster::gpu::GpuRasterizer;
@@ -36,26 +36,26 @@ pub fn raster(
         .clone();
 
     let scaler = (1.0 / font.head_table().units_per_em as f32) * size;
-    let width_f = (outline.x_max as f32 - outline.x_min as f32) * scaler;
+    let width_f = (outline.x_max - outline.x_min) * scaler;
     let width_r = width_f.ceil();
     let image_w = width_r as u32;
     let scaler_hori = ((width_r / width_f) * scaler) / width_r;
-    let trans_x = |x: f32| (x - outline.x_min as f32) * scaler_hori;
+    let trans_x = |x: f32| (x - outline.x_min) * scaler_hori;
 
     let (image_h, bearing_y, scaler_above, scaler_below) =
-        if outline.y_max <= 0 || outline.y_min >= 0 {
+        if outline.y_max <= 0.0 || outline.y_min >= 0.0 {
             // Everything above or below baseline
-            let height_f = (outline.y_max as f32 - outline.y_min as f32) * scaler;
-            let y_max_r = (outline.y_max as f32 * scaler).ceil();
-            let y_min_r = (outline.y_min as f32 * scaler).floor(); // Ceil or Floor?
+            let height_f = (outline.y_max - outline.y_min) * scaler;
+            let y_max_r = (outline.y_max * scaler).ceil();
+            let y_min_r = (outline.y_min * scaler).floor(); // Ceil or Floor?
             let height_r = y_max_r - y_min_r;
             let image_h = height_r as u32;
             let scaler_vert = ((height_r / height_f) * scaler) / image_h as f32;
             (image_h, y_min_r as i16, scaler_vert, scaler_vert)
         } else {
             // Some above and below baseline
-            let above_f = outline.y_max as f32 * scaler;
-            let below_f = outline.y_min as f32 * scaler;
+            let above_f = outline.y_max * scaler;
+            let below_f = outline.y_min * scaler;
             let above_r = above_f.ceil();
             let below_r = below_f.round(); // Ideally floor, but on small text round works better
             let image_h = (above_r - below_r) as u32;
@@ -64,32 +64,29 @@ pub fn raster(
             (image_h, below_r as i16, scaler_above, scaler_below)
         };
 
-    let y_min_f = outline.y_min as f32;
-
     let trans_y = |y: f32| {
         if y > 0.0 {
-            1.0 - ((y - y_min_f) * scaler_above)
+            1.0 - ((y - outline.y_min) * scaler_above)
         } else {
-            1.0 - ((y - y_min_f) * scaler_below)
+            1.0 - ((y - outline.y_min) * scaler_below)
         }
     };
 
     let mut segment_data: Vec<[f32; 4]> = Vec::new();
 
-    for segment in outline.segments() {
-        segment_data.push([
-            trans_x(segment.p1.x),
-            trans_y(segment.p1.y),
-            trans_x(segment.p2.x),
-            trans_y(segment.p2.y),
-        ]);
-    }
-
-    for curve in outline.curves() {
-        for i in 0..16 {
-            let [p1x, p1y] = curve.evaluate(i as f32 / 16.0);
-            let [p2x, p2y] = curve.evaluate((i + 1) as f32 / 16.0);
-            segment_data.push([trans_x(p1x), trans_y(p1y), trans_x(p2x), trans_y(p2y)]);
+    for geometry in outline.geometry.iter() {
+        if let OutlineGeometry::Segment {
+            p1,
+            p2,
+        } = geometry
+        {
+            segment_data.push([trans_x(p1.x), trans_y(p1.y), trans_x(p2.x), trans_y(p2.y)]);
+        } else {
+            for i in 0..16 {
+                let p1 = geometry.evaluate(i as f32 / 16.0);
+                let p2 = geometry.evaluate((i + 1) as f32 / 16.0);
+                segment_data.push([trans_x(p1.x), trans_y(p1.y), trans_x(p2.x), trans_y(p2.y)]);
+            }
         }
     }
 

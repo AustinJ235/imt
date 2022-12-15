@@ -77,7 +77,7 @@ pub fn outline_apply_gvar(
         .get(&glyph_index)
         .ok_or(ImtUtilError::NoData)?;
 
-    let mut point_deltas = vec![[0.0, 0.0]; outline.num_packed_points + 4];
+    let mut point_deltas = vec![[0.0, 0.0]; outline.points.len() + 4];
 
     'tuple: for tuple in glyph_variation.tuples.iter() {
         let mut tuple_scaler = 1.0;
