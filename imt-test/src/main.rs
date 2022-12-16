@@ -4,11 +4,10 @@ use basalt::interface::bin::{self, BinStyle, ImageEffect};
 use basalt::{Basalt, BstOptions};
 
 pub const TEXT_HEIGHT: f32 = 32.0;
-//pub const TEXT: &'static str = "Sphinx of black quartz, judge my vow.";
-// pub const TEXT: &'static str = "a a a a a a a a a a";
-pub const TEXT: &'static str = "G G G G G G G G G G";
+pub const TEXT: &'static str = "Sphinx of black quartz, judge my vow.";
 
 pub const USE_VARIATION: bool = true;
+pub const VARIATION_INSTANCE: usize = 14;
 
 fn main() {
     Basalt::initialize(
@@ -69,7 +68,6 @@ fn main() {
             let mut x = 0.0;
             let scaler = (1.0 / font.head_table().units_per_em as f32) * TEXT_HEIGHT;
             let max_y = (font.head_table().y_max as f32 * scaler).ceil();
-            let mut coord_i = 0;
 
             let rasterizer = imt::raster::gpu::GpuRasterizer::new(basalt.compute_queue());
             start = Instant::now();
@@ -90,10 +88,9 @@ fn main() {
                 let mut outline = font.glyf_table().outlines.get(&index).unwrap().clone();
 
                 if USE_VARIATION {
-                    let mut coords = font.fvar_table().unwrap().instances[coord_i]
+                    let mut coords = font.fvar_table().unwrap().instances[VARIATION_INSTANCE]
                         .coordinates
                         .clone();
-                    coord_i += 1;
                     coords[2] = TEXT_HEIGHT;
                     imt::util::variation::normalize_axis_coords(&font, &mut coords).unwrap();
                     imt::util::variation::outline_apply_gvar(&font, *index, &mut outline, &coords)

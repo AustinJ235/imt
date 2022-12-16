@@ -87,10 +87,10 @@ pub fn outline_apply_gvar(
         let mut tuple_applies = false;
 
         for (axis_i, axis_coord) in coords.iter().enumerate() {
-            let peak = tuple.peak[0];
+            let peak = tuple.peak[axis_i];
 
             // If the peak is at zero it is ignored.
-            if peak == 0.0 || *axis_coord == 0.0 {
+            if peak == 0.0 {
                 continue;
             }
 
@@ -123,7 +123,8 @@ pub fn outline_apply_gvar(
                 }
             } else {
                 // Out of range
-                if *axis_coord < peak.min(0.0) || *axis_coord > peak.max(0.0) {
+                if *axis_coord == 0.0 || *axis_coord < peak.min(0.0) || *axis_coord > peak.max(0.0)
+                {
                     continue 'tuple;
                 }
 
