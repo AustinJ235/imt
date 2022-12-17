@@ -11,6 +11,7 @@ pub mod gvar_table;
 pub mod head_table;
 pub mod hhea_table;
 pub mod hmtx_table;
+pub mod hvar_table;
 pub mod loca_table;
 pub mod maxp_table;
 pub mod name_table;
@@ -22,10 +23,14 @@ pub use cmap_table::{CmapSubtable, CmapTable, EncodingRecord};
 pub use font::Font;
 pub use fvar_table::{FvarTable, InstanceRecord, VariationAxisRecord};
 pub use glyf_table::{GlyfTable, Outline, OutlineGeometry, OutlinePoint};
-pub use gvar_table::GvarTable;
+pub use gvar_table::{GlyphVariation, GvarTable, IntermediateTuples, TupleVariation};
 pub use head_table::HeadTable;
 pub use hhea_table::HheaTable;
 pub use hmtx_table::HmtxTable;
+pub use hvar_table::{
+    DeltaData, DeltaSet, HvarTable, ItemVariationData, ItemVariationStore, RegionAxisCoordinates,
+    VariationRegion,
+};
 pub use loca_table::LocaTable;
 pub use maxp_table::MaxpTable;
 pub use name_table::{LangTagRecord, NameRecord, NameTable};
@@ -38,13 +43,23 @@ fn read_u16(bytes: &[u8], offset: usize) -> u16 {
 }
 
 #[inline(always)]
+fn read_u32(bytes: &[u8], offset: usize) -> u32 {
+    u32::from_be_bytes(bytes[offset..(offset + 4)].try_into().unwrap())
+}
+
+#[inline(always)]
+fn read_i8(bytes: &[u8], offset: usize) -> i8 {
+    i8::from_be_bytes(bytes[offset..(offset + 1)].try_into().unwrap())
+}
+
+#[inline(always)]
 fn read_i16(bytes: &[u8], offset: usize) -> i16 {
     i16::from_be_bytes(bytes[offset..(offset + 2)].try_into().unwrap())
 }
 
 #[inline(always)]
-fn read_u32(bytes: &[u8], offset: usize) -> u32 {
-    u32::from_be_bytes(bytes[offset..(offset + 4)].try_into().unwrap())
+fn read_i32(bytes: &[u8], offset: usize) -> i32 {
+    i32::from_be_bytes(bytes[offset..(offset + 4)].try_into().unwrap())
 }
 
 #[inline(always)]
@@ -112,4 +127,5 @@ pub mod table_tag {
     pub const NAME: u32 = tag(b"name");
     pub const GVAR: u32 = tag(b"gvar");
     pub const AVAR: u32 = tag(b"avar");
+    pub const HVAR: u32 = tag(b"HVAR");
 }
