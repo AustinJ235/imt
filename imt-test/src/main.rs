@@ -87,7 +87,7 @@ fn main() {
 
                 let mut outline = font.glyf_table().outlines.get(&index).unwrap().clone();
 
-                if USE_VARIATION {
+                let variation_adv = if USE_VARIATION {
                     let mut coords = font.fvar_table().unwrap().instances[VARIATION_INSTANCE]
                         .coordinates
                         .clone();
@@ -95,7 +95,10 @@ fn main() {
                     imt::util::variation::normalize_axis_coords(&font, &mut coords).unwrap();
                     imt::util::variation::outline_apply_gvar(&font, *index, &mut outline, &coords)
                         .unwrap();
-                }
+                    imt::util::variation::advance_width(&font, *index, &coords).unwrap()
+                } else {
+                    0.0
+                };
 
                 let render =
                     imt::raster::gpu::compute::raster(&font, &outline, TEXT_HEIGHT, &rasterizer);
@@ -104,7 +107,8 @@ fn main() {
 
                 let raw_width = (outline.x_max as f32 - outline.x_min as f32) * scaler;
                 let add_advance = render.width as f32 - raw_width;
-                let advance = ((hor_metric.advance_width as f32 * scaler) + add_advance).ceil();
+
+                let advance = (((hor_metric.advance_width as f32 + variation_adv) * scaler) + add_advance).ceil();
                 let x_offset = (outline.x_min as f32 * scaler).ceil();
 
                 let disp = basalt.interface_ref().new_bin();

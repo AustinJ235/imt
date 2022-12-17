@@ -1,7 +1,6 @@
 use crate::parse::*;
 
-// TODO: Tables not currently parsed in RobotoFlex: GDEF, GPOS, GSUB, HVAR, OS/2, STAT,
-//       gasp, post, prep
+// TODO: Not currently parsed in RobotoFlex: GDEF, GPOS, GSUB, OS/2, STAT, gasp, post, prep
 
 #[derive(Debug, Clone)]
 pub struct Font {

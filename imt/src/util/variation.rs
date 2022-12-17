@@ -59,6 +59,91 @@ pub fn normalize_axis_coords(font: &Font, coords: &mut Vec<f32>) -> Result<(), I
     Ok(())
 }
 
+pub fn advance_width(
+    font: &Font,
+    glyph_index: u16,
+    coords: &Vec<f32>,
+) -> Result<f32, ImtUtilError> {
+    if coords.iter().any(|coord| *coord < -1.0 || *coord > 1.0) {
+        return Err(ImtUtilError::InvalidCoords);
+    }
+
+    let hvar = match font.hvar_table() {
+        Some(some) => some,
+        None => return Ok(0.0),
+    };
+
+    if coords.len() != hvar.item_variation_store.axis_count {
+        return Err(ImtUtilError::InvalidCoords);
+    }
+
+    let [outer_index, inner_index] = match hvar.advance_map.as_ref() {
+        Some(im) => {
+            let mut map_index = glyph_index as usize;
+
+            if map_index >= im.map_data.len() {
+                map_index = im.map_data.len() - 1;
+            }
+
+            im.map_data[map_index]
+        },
+        None => [0, glyph_index as usize],
+    };
+
+    if outer_index >= hvar.item_variation_store.item_data.len() {
+        return Ok(0.0);
+    }
+
+    let item_data = &hvar.item_variation_store.item_data[outer_index];
+
+    if inner_index >= item_data.delta_sets.len() {
+        return Ok(0.0);
+    }
+
+    let mut total_delta = 0.0;
+
+    'delta_data: for (i, delta_data) in item_data.delta_sets[inner_index].data.iter().enumerate() {
+        let delta = delta_data.as_f32();
+        let region = &hvar.item_variation_store.regions[item_data.region_indexes[i]];
+
+        let mut all_ignored = true;
+        let mut scaler = 1.0;
+
+        for (coord, region) in coords.iter().zip(region.axes.iter()) {
+            if region.peak == 0.0 {
+                continue;
+            }
+
+            if region.peak == *coord {
+                all_ignored = false;
+                continue;
+            }
+
+            if *coord < region.start || *coord > region.end {
+                continue 'delta_data;
+            }
+
+            if *coord == region.start || *coord == region.end {
+                continue 'delta_data;
+            }
+
+            all_ignored = false;
+
+            if *coord < region.peak {
+                scaler *= (*coord - region.start) / (region.peak - region.start);
+            } else {
+                scaler *= (region.end - *coord) / (region.end - region.peak);
+            }
+        }
+
+        if !all_ignored {
+            total_delta += scaler * delta;
+        }
+    }
+
+    Ok(total_delta)
+}
+
 pub fn outline_apply_gvar(
     font: &Font,
     glyph_index: u16,

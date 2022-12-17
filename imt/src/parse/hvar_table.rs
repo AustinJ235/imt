@@ -120,11 +120,21 @@ pub struct DeltaSet {
     pub data: Vec<DeltaData>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum DeltaData {
     I8(i8),
     I16(i16),
     I32(i32),
+}
+
+impl DeltaData {
+    pub fn as_f32(&self) -> f32 {
+        match self {
+            Self::I8(v) => *v as f32,
+            Self::I16(v) => *v as f32,
+            Self::I32(v) => *v as f32,
+        }
+    }
 }
 
 impl ItemVariationStore {
