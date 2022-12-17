@@ -18,6 +18,9 @@ pub struct HvarTable {
     pub major_version: u16,
     pub minor_version: u16,
     pub item_variation_store: ItemVariationStore,
+    pub advance_map: Option<DeltaSetIndexMap>,
+    pub lsb_map: Option<DeltaSetIndexMap>,
+    pub rsb_map: Option<DeltaSetIndexMap>,
 }
 
 impl HvarTable {
@@ -55,16 +58,32 @@ impl HvarTable {
             offset => Some(offset as usize + table_offset),
         };
 
-        //
+        // Parse variation table and delta index maps.
 
         let item_variation_store = ItemVariationStore::try_parse(bytes, var_store_offset)?;
 
-        //
+        let advance_map = match adv_mapping_offset {
+            Some(offset) => Some(DeltaSetIndexMap::try_parse(bytes, offset)?),
+            None => None,
+        };
+
+        let lsb_map = match lsb_mapping_offset {
+            Some(offset) => Some(DeltaSetIndexMap::try_parse(bytes, offset)?),
+            None => None,
+        };
+
+        let rsb_map = match rsb_mapping_offset {
+            Some(offset) => Some(DeltaSetIndexMap::try_parse(bytes, offset)?),
+            None => None,
+        };
 
         Ok(Self {
             major_version,
             minor_version,
             item_variation_store,
+            advance_map,
+            lsb_map,
+            rsb_map,
         })
     }
 }
@@ -311,6 +330,76 @@ impl ItemVariationStore {
             axis_count,
             regions,
             item_data,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DeltaSetIndexMap {
+    pub map_data: Vec<[usize; 2]>,
+}
+
+impl DeltaSetIndexMap {
+    pub fn try_parse(bytes: &[u8], map_offset: usize) -> Result<Self, ImtError> {
+        if map_offset + 2 > bytes.len() {
+            return Err(TRUNCATED);
+        }
+
+        let format = bytes[map_offset];
+        let entry_format = bytes[map_offset + 1];
+
+        let (map_count, mut map_data_offset) = match format {
+            0 => {
+                if map_offset + 4 > bytes.len() {
+                    return Err(TRUNCATED);
+                }
+
+                (read_u16(bytes, map_offset + 2) as usize, 4)
+            },
+            1 => {
+                if map_offset + 6 > bytes.len() {
+                    return Err(TRUNCATED);
+                }
+
+                (read_u32(bytes, map_offset + 2) as usize, 6)
+            },
+            _ => return Err(MALFORMED),
+        };
+
+        let entry_size = (((entry_format & 0x30) >> 4) + 1) as usize;
+
+        // NOTE: Although the spec makes it seem it is possible to use more than 4 bytes, it
+        //       wouldn't make any sense since itemVariationDataCount is 2 bytes and itemCount
+        //       is also 2 bytes; therefore, return malformed.
+
+        if entry_size == 0 || entry_size > 4 {
+            return Err(MALFORMED);
+        }
+
+        if map_data_offset + (map_count * entry_size) > bytes.len() {
+            return Err(TRUNCATED);
+        }
+
+        let inner_index_bit_count = (entry_format & 0x0F) + 1;
+        let mut map_data = Vec::with_capacity(map_count);
+
+        for _ in 0..map_count {
+            let mut v = 0_u32;
+
+            for i in 0..entry_size {
+                v = (v << 8) + bytes[map_data_offset + i] as u32;
+            }
+
+            map_data_offset += entry_size;
+
+            map_data.push([
+                (v >> inner_index_bit_count) as usize,
+                (v & ((1 << inner_index_bit_count) - 1)) as usize,
+            ]);
+        }
+
+        Ok(Self {
+            map_data,
         })
     }
 }
