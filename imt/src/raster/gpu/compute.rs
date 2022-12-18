@@ -10,61 +10,25 @@ use vulkano::image::{ImageCreateFlags, ImageDimensions, ImageUsage, StorageImage
 use vulkano::pipeline::{Pipeline, PipelineBindPoint};
 use vulkano::sync::GpuFuture;
 
-use crate::parse::{Font, Outline, OutlineGeometry};
+use crate::parse::OutlineGeometry;
 use crate::raster::gpu::image_view::ImtImageView;
 use crate::raster::gpu::shaders::nonzero_cs;
 use crate::raster::gpu::GpuRasterizer;
+use crate::raster::ScaledGlyph;
 
-pub struct ComputeGlyphRender {
+#[derive(Debug, Clone)]
+pub struct GpuRasteredGlyph {
     pub width: u32,
     pub height: u32,
+    pub bearing_x: i16,
     pub bearing_y: i16,
+    pub advance_w: i16,
     pub bitmap: Arc<ImtImageView>,
+    pub unique_id: u64,
 }
 
-pub fn raster(
-    font: &Font,
-    outline: &Outline,
-    size: f32,
-    rasterizer: &GpuRasterizer,
-) -> ComputeGlyphRender {
-    let scaler = (1.0 / font.head_table().units_per_em as f32) * size;
-    let width_f = (outline.x_max - outline.x_min) * scaler;
-    let width_r = width_f.ceil();
-    let image_w = width_r as u32;
-    let scaler_hori = ((width_r / width_f) * scaler) / width_r;
-    let trans_x = |x: f32| (x - outline.x_min) * scaler_hori;
-
-    let (image_h, bearing_y, scaler_above, scaler_below) =
-        if outline.y_max <= 0.0 || outline.y_min >= 0.0 {
-            // Everything above or below baseline
-            let height_f = (outline.y_max - outline.y_min) * scaler;
-            let y_max_r = (outline.y_max * scaler).ceil();
-            let y_min_r = (outline.y_min * scaler).floor(); // Ceil or Floor?
-            let height_r = y_max_r - y_min_r;
-            let image_h = height_r as u32;
-            let scaler_vert = ((height_r / height_f) * scaler) / image_h as f32;
-            (image_h, y_min_r as i16, scaler_vert, scaler_vert)
-        } else {
-            // Some above and below baseline
-            let above_f = outline.y_max * scaler;
-            let below_f = outline.y_min * scaler;
-            let above_r = above_f.ceil();
-            let below_r = below_f.round(); // Ideally floor, but on small text round works better
-            let image_h = (above_r - below_r) as u32;
-            let scaler_above = ((above_r / above_f) * scaler) / image_h as f32;
-            let scaler_below = ((below_r / below_f) * scaler) / image_h as f32;
-            (image_h, below_r as i16, scaler_above, scaler_below)
-        };
-
-    let trans_y = |y: f32| {
-        if y > 0.0 {
-            1.0 - ((y - outline.y_min) * scaler_above)
-        } else {
-            1.0 - ((y - outline.y_min) * scaler_below)
-        }
-    };
-
+pub fn raster(glyph: &ScaledGlyph, rasterizer: &GpuRasterizer) -> GpuRasteredGlyph {
+    let outline = glyph.outline.as_ref().unwrap();
     let mut segment_data: Vec<[f32; 4]> = Vec::new();
 
     for geometry in outline.geometry.iter() {
@@ -73,12 +37,12 @@ pub fn raster(
             p2,
         } = geometry
         {
-            segment_data.push([trans_x(p1.x), trans_y(p1.y), trans_x(p2.x), trans_y(p2.y)]);
+            segment_data.push([p1.x, p1.y, p2.x, p2.y]);
         } else {
             for i in 0..16 {
                 let p1 = geometry.evaluate(i as f32 / 16.0);
                 let p2 = geometry.evaluate((i + 1) as f32 / 16.0);
-                segment_data.push([trans_x(p1.x), trans_y(p1.y), trans_x(p2.x), trans_y(p2.y)]);
+                segment_data.push([p1.x, p1.y, p2.x, p2.y]);
             }
         }
     }
@@ -94,7 +58,7 @@ pub fn raster(
     .collect();
 
     let nonzero_info = nonzero_cs::ty::Info {
-        extent: [image_w as f32 * 12.0, image_h as f32 * 4.0],
+        extent: [glyph.width as f32 * 12.0, glyph.height as f32 * 4.0],
         numSegments: segment_data.len() as _,
         numRays: ray_data.len() as _,
     };
@@ -140,8 +104,8 @@ pub fn raster(
         StorageImage::with_usage(
             &rasterizer.mem_alloc,
             ImageDimensions::Dim2d {
-                width: image_w * 12,
-                height: image_h * 4,
+                width: glyph.width * 12,
+                height: glyph.height * 4,
                 array_layers: 1,
             },
             Format::R8_UNORM,
@@ -160,8 +124,8 @@ pub fn raster(
         StorageImage::with_usage(
             &rasterizer.mem_alloc,
             ImageDimensions::Dim2d {
-                width: image_w * 3,
-                height: image_h * 1,
+                width: glyph.width * 3,
+                height: glyph.height * 1,
                 array_layers: 1,
             },
             Format::R8_UNORM,
@@ -180,8 +144,8 @@ pub fn raster(
         StorageImage::with_usage(
             &rasterizer.mem_alloc,
             ImageDimensions::Dim2d {
-                width: image_w,
-                height: image_h,
+                width: glyph.width,
+                height: glyph.height,
                 array_layers: 1,
             },
             Format::R8G8B8A8_UNORM,
@@ -266,7 +230,7 @@ pub fn raster(
             0,
             nonzero_info,
         )
-        .dispatch([image_w * 12, image_h * 4, 1])
+        .dispatch([glyph.width * 12, glyph.height * 4, 1])
         .unwrap()
         .bind_pipeline_compute(rasterizer.downscale_pipeline.clone())
         .bind_descriptor_sets(
@@ -275,7 +239,7 @@ pub fn raster(
             0,
             downscale_desc_set,
         )
-        .dispatch([image_w * 3, image_h, 1])
+        .dispatch([glyph.width * 3, glyph.height, 1])
         .unwrap()
         .bind_pipeline_compute(rasterizer.hinting_pipeline.clone())
         .bind_descriptor_sets(
@@ -284,7 +248,7 @@ pub fn raster(
             0,
             hinting_desc_set,
         )
-        .dispatch([image_w, image_h, 1])
+        .dispatch([glyph.width, glyph.height, 1])
         .unwrap();
 
     let exec_cmd = cmd_buf.build().unwrap();
@@ -297,10 +261,13 @@ pub fn raster(
         .wait(None)
         .unwrap();
 
-    ComputeGlyphRender {
-        width: image_w,
-        height: image_h,
-        bearing_y,
+    GpuRasteredGlyph {
+        width: glyph.width,
+        height: glyph.height,
+        bearing_x: glyph.bearing_x,
+        bearing_y: glyph.bearing_y,
+        advance_w: glyph.advance_w,
         bitmap: hinting_image,
+        unique_id: glyph.unique_id,
     }
 }
