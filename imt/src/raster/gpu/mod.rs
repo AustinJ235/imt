@@ -4,14 +4,22 @@ pub mod shaders;
 
 use std::sync::Arc;
 
+use vulkano::buffer::{BufferUsage, DeviceLocalBuffer};
 use vulkano::command_buffer::allocator::StandardCommandBufferAllocator;
+use vulkano::command_buffer::{
+    AutoCommandBufferBuilder, CommandBufferExecFuture, CommandBufferUsage,
+    PrimaryCommandBufferAbstract,
+};
 use vulkano::descriptor_set::allocator::StandardDescriptorSetAllocator;
 use vulkano::device::Queue;
 use vulkano::memory::allocator::StandardMemoryAllocator;
 use vulkano::pipeline::ComputePipeline;
 use vulkano::shader::ShaderModule;
+use vulkano::sync::GpuFuture;
 
+use crate::raster::gpu::compute::{raster, GpuRasteredGlyph};
 use crate::raster::gpu::shaders::*;
+use crate::raster::ScaledGlyph;
 
 #[allow(dead_code)]
 pub struct GpuRasterizer {
@@ -25,6 +33,7 @@ pub struct GpuRasterizer {
     nonzero_pipeline: Arc<ComputePipeline>,
     downscale_pipeline: Arc<ComputePipeline>,
     hinting_pipeline: Arc<ComputePipeline>,
+    nonzero_raydata: Arc<DeviceLocalBuffer<[[f32; 2]]>>,
 }
 
 impl GpuRasterizer {
@@ -67,6 +76,44 @@ impl GpuRasterizer {
         )
         .unwrap();
 
+        let ray_data: Vec<[f32; 2]> = [
+            45.0_f32.to_radians(),
+            135.0_f32.to_radians(),
+            //225.0_f32.to_radians(),
+            //315.0_f32.to_radians(),
+        ]
+        .into_iter()
+        .map(|a| [a.cos(), a.sin()])
+        .collect();
+
+        let mut tx_cmd_b = AutoCommandBufferBuilder::primary(
+            &cmd_alloc,
+            queue.queue_family_index(),
+            CommandBufferUsage::OneTimeSubmit,
+        )
+        .unwrap();
+
+        let nonzero_raydata = DeviceLocalBuffer::from_iter(
+            &mem_alloc,
+            ray_data,
+            BufferUsage {
+                storage_buffer: true,
+                ..BufferUsage::empty()
+            },
+            &mut tx_cmd_b,
+        )
+        .unwrap();
+
+        tx_cmd_b
+            .build()
+            .unwrap()
+            .execute(queue.clone())
+            .unwrap()
+            .then_signal_fence_and_flush()
+            .unwrap()
+            .wait(None)
+            .unwrap();
+
         Self {
             queue,
             mem_alloc,
@@ -78,6 +125,37 @@ impl GpuRasterizer {
             nonzero_pipeline,
             downscale_pipeline,
             hinting_pipeline,
+            nonzero_raydata,
         }
+    }
+
+    pub fn process(&self, glyphs: &[ScaledGlyph]) -> Vec<GpuRasteredGlyph> {
+        let mut previous = None;
+        let mut output = Vec::with_capacity(glyphs.len());
+
+        for glyph in glyphs.iter() {
+            let (rastered, future) = raster(
+                &glyph,
+                self,
+                previous.take().map(
+                    |v: CommandBufferExecFuture<Box<dyn GpuFuture + Send + Sync>>| {
+                        v.boxed_send_sync()
+                    },
+                ),
+            );
+
+            previous = Some(future);
+            output.push(rastered);
+        }
+
+        if let Some(future) = previous.take() {
+            future
+                .then_signal_fence_and_flush()
+                .unwrap()
+                .wait(None)
+                .unwrap();
+        }
+
+        output
     }
 }

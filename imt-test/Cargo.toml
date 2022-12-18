@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 basalt = "0.19"
 imt = { path = "../imt" }
+parking_lot = "0.12.1"

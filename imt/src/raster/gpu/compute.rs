@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use vulkano::buffer::{BufferUsage, DeviceLocalBuffer};
 use vulkano::command_buffer::{
-    AutoCommandBufferBuilder, CommandBufferUsage, PrimaryCommandBufferAbstract,
+    AutoCommandBufferBuilder, CommandBufferExecFuture, CommandBufferUsage,
+    PrimaryCommandBufferAbstract,
 };
 use vulkano::descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet};
 use vulkano::format::Format;
@@ -27,7 +28,14 @@ pub struct GpuRasteredGlyph {
     pub unique_id: u64,
 }
 
-pub fn raster(glyph: &ScaledGlyph, rasterizer: &GpuRasterizer) -> GpuRasteredGlyph {
+pub(super) fn raster(
+    glyph: &ScaledGlyph,
+    rasterizer: &GpuRasterizer,
+    previous: Option<Box<dyn GpuFuture + Send + Sync>>,
+) -> (
+    GpuRasteredGlyph,
+    CommandBufferExecFuture<Box<dyn GpuFuture + Send + Sync>>,
+) {
     let outline = glyph.outline.as_ref().unwrap();
     let mut segment_data: Vec<[f32; 4]> = Vec::new();
 
@@ -39,45 +47,24 @@ pub fn raster(glyph: &ScaledGlyph, rasterizer: &GpuRasterizer) -> GpuRasteredGly
         {
             segment_data.push([p1.x, p1.y, p2.x, p2.y]);
         } else {
-            for i in 0..16 {
-                let p1 = geometry.evaluate(i as f32 / 16.0);
-                let p2 = geometry.evaluate((i + 1) as f32 / 16.0);
+            for i in 0..8 {
+                let p1 = geometry.evaluate(i as f32 / 8.0);
+                let p2 = geometry.evaluate((i + 1) as f32 / 8.0);
                 segment_data.push([p1.x, p1.y, p2.x, p2.y]);
             }
         }
     }
 
-    let ray_data: Vec<[f32; 2]> = [
-        45.0_f32.to_radians(),
-        135.0_f32.to_radians(),
-        225.0_f32.to_radians(),
-        315.0_f32.to_radians(),
-    ]
-    .into_iter()
-    .map(|a| [a.cos(), a.sin()])
-    .collect();
-
     let nonzero_info = nonzero_cs::ty::Info {
         extent: [glyph.width as f32 * 12.0, glyph.height as f32 * 4.0],
         numSegments: segment_data.len() as _,
-        numRays: ray_data.len() as _,
+        numRays: 1,
     };
 
     let mut tx_cmd_b = AutoCommandBufferBuilder::primary(
         &rasterizer.cmd_alloc,
         rasterizer.queue.queue_family_index(),
         CommandBufferUsage::OneTimeSubmit,
-    )
-    .unwrap();
-
-    let nonzero_raydata = DeviceLocalBuffer::from_iter(
-        &rasterizer.mem_alloc,
-        ray_data,
-        BufferUsage {
-            storage_buffer: true,
-            ..BufferUsage::empty()
-        },
-        &mut tx_cmd_b,
     )
     .unwrap();
 
@@ -92,13 +79,28 @@ pub fn raster(glyph: &ScaledGlyph, rasterizer: &GpuRasterizer) -> GpuRasteredGly
     )
     .unwrap();
 
-    let tx_cmd = tx_cmd_b
-        .build()
-        .unwrap()
-        .execute(rasterizer.queue.clone())
-        .unwrap()
-        .then_signal_semaphore_and_flush()
-        .unwrap();
+    let tx_cmd = match previous {
+        Some(future) => {
+            future
+                .then_signal_semaphore_and_flush()
+                .unwrap()
+                .then_execute_same_queue(tx_cmd_b.build().unwrap())
+                .unwrap()
+                .then_signal_semaphore_and_flush()
+                .unwrap()
+                .boxed_send_sync()
+        },
+        None => {
+            tx_cmd_b
+                .build()
+                .unwrap()
+                .execute(rasterizer.queue.clone())
+                .unwrap()
+                .then_signal_semaphore_and_flush()
+                .unwrap()
+                .boxed_send_sync()
+        },
+    };
 
     let nonzero_image = ImtImageView::from_storage(
         StorageImage::with_usage(
@@ -171,7 +173,7 @@ pub fn raster(glyph: &ScaledGlyph, rasterizer: &GpuRasterizer) -> GpuRasteredGly
             .unwrap()
             .clone(),
         [
-            WriteDescriptorSet::buffer(0, nonzero_raydata.clone()),
+            WriteDescriptorSet::buffer(0, rasterizer.nonzero_raydata.clone()),
             WriteDescriptorSet::buffer(1, nonzero_segdata.clone()),
             WriteDescriptorSet::image_view(2, nonzero_image.clone()),
         ],
@@ -252,22 +254,18 @@ pub fn raster(glyph: &ScaledGlyph, rasterizer: &GpuRasterizer) -> GpuRasteredGly
         .unwrap();
 
     let exec_cmd = cmd_buf.build().unwrap();
+    let future = tx_cmd.then_execute_same_queue(exec_cmd).unwrap();
 
-    tx_cmd
-        .then_execute_same_queue(exec_cmd)
-        .unwrap()
-        .then_signal_fence_and_flush()
-        .unwrap()
-        .wait(None)
-        .unwrap();
-
-    GpuRasteredGlyph {
-        width: glyph.width,
-        height: glyph.height,
-        bearing_x: glyph.bearing_x,
-        bearing_y: glyph.bearing_y,
-        advance_w: glyph.advance_w,
-        bitmap: hinting_image,
-        unique_id: glyph.unique_id,
-    }
+    (
+        GpuRasteredGlyph {
+            width: glyph.width,
+            height: glyph.height,
+            bearing_x: glyph.bearing_x,
+            bearing_y: glyph.bearing_y,
+            advance_w: glyph.advance_w,
+            bitmap: hinting_image,
+            unique_id: glyph.unique_id,
+        },
+        future,
+    )
 }
