@@ -58,7 +58,7 @@ pub(super) fn raster(
     let nonzero_info = nonzero_cs::ty::Info {
         extent: [glyph.width as f32 * 12.0, glyph.height as f32 * 4.0],
         numSegments: segment_data.len() as _,
-        numRays: 1,
+        numRays: 2,
     };
 
     let mut tx_cmd_b = AutoCommandBufferBuilder::primary(

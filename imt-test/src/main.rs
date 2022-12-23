@@ -279,6 +279,7 @@ fn render_line<T: AsRef<str>>(
     let scaler = (1.0 / font.head_table().units_per_em as f32) * size;
     let max_y = (font.head_table().y_max as f32 * scaler).ceil();
     let mut x = 0.0;
+    let mut last_x_max = 0.0;
 
     let mut info: Vec<(f32, f32)> = Vec::with_capacity(bin_count);
     let mut glyphs = Vec::with_capacity(bin_count);
@@ -297,13 +298,20 @@ fn render_line<T: AsRef<str>>(
             continue;
         }
 
-        let adv = scaled.advance_w as f32;
-        let glyph_y = max_y - scaled.height as f32 - scaled.bearing_y as f32;
+        let mut adv = scaled.advance_w as f32;
+        let glyph_y = pos_from_t + max_y - scaled.height as f32 - scaled.bearing_y as f32;
+        let mut glyph_x = x + scaled.bearing_x as f32;
 
-        info.push((pos_from_t + glyph_y, 10.0 + scaled.bearing_x as f32 + x));
+        if glyph_x < last_x_max {
+            let diff = last_x_max - glyph_x;
+            adv += diff;
+            glyph_x += diff;
+        }
 
-        glyphs.push(scaled);
+        info.push((pos_from_t + glyph_y, 10.0 + glyph_x));
         x += adv;
+        last_x_max = glyph_x + scaled.width as f32;
+        glyphs.push(scaled);
     }
 
     let glyphs = rasterizer.process(&glyphs);

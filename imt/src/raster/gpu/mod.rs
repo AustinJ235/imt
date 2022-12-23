@@ -79,8 +79,8 @@ impl GpuRasterizer {
         let ray_data: Vec<[f32; 2]> = [
             45.0_f32.to_radians(),
             135.0_f32.to_radians(),
-            //225.0_f32.to_radians(),
-            //315.0_f32.to_radians(),
+            225.0_f32.to_radians(),
+            315.0_f32.to_radians(),
         ]
         .into_iter()
         .map(|a| [a.cos(), a.sin()])

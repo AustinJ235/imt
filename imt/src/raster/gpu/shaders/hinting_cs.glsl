@@ -17,26 +17,28 @@ float pixelValue(ivec2 reqCoords) {
     return imageLoad(srcImage, reqCoords).r;
 }
 
+const float ONE_THIRD = 1.0 / 3.0;
+
 void main() {
     ivec2 srcCoords = ivec2(
         int(gl_GlobalInvocationID.x) * 3,
         int(gl_GlobalInvocationID.y)
     );
 
-    float a = pixelValue(srcCoords + ivec2(-1, 0));
-    float b = pixelValue(srcCoords + ivec2(0, 0));
-    float c = pixelValue(srcCoords + ivec2(1, 0));
-    float d = pixelValue(srcCoords + ivec2(2, 0));
-    float e = pixelValue(srcCoords + ivec2(3, 0));
+    float a = pixelValue(srcCoords + ivec2(-1, 0)) * ONE_THIRD;
+    float b = pixelValue(srcCoords + ivec2(0, 0)) * ONE_THIRD;
+    float c = pixelValue(srcCoords + ivec2(1, 0)) * ONE_THIRD;
+    float d = pixelValue(srcCoords + ivec2(2, 0)) * ONE_THIRD;
+    float e = pixelValue(srcCoords + ivec2(3, 0)) * ONE_THIRD;
 
     imageStore(
         dstImage,
         ivec2(gl_GlobalInvocationID.x, gl_GlobalInvocationID.y),
         vec4(
             vec3(
-                (a * (1.0 / 3.0)) + (b * (1.0 / 3.0)) + (c * (1.0 / 3.0)),
-                (b * (1.0 / 3.0)) + (c * (1.0 / 3.0)) + (d * (1.0 / 3.0)),
-                (c * (1.0 / 3.0)) + (d * (1.0 / 3.0)) + (e * (1.0 / 3.0))
+                a + b + c,
+                b + c + d,
+                c + d + e
             ),
             1.0
         )
