@@ -46,14 +46,14 @@ pub const VARIATION_INSTANCE: usize = 3;
 fn main() {
     Basalt::initialize(
         BstOptions::default()
-            .window_size(1024, 512)
+            .window_size(1250, 500)
             .title("Basalt")
             .app_loop(),
         Box::new(move |basalt_res| {
             let basalt = basalt_res.unwrap();
             let roboto = include_bytes!("../../imt/src/RobotoFlex.ttf");
             let mut start = Instant::now();
-            let font = imt::parse::Font::from_bytes(roboto).unwrap();
+            let font = Arc::new(imt::parse::Font::from_bytes(roboto).unwrap());
 
             println!(
                 "Time to Parse: {} ms",
@@ -97,6 +97,7 @@ fn main() {
             );
 
             let bst = basalt.clone();
+            let method_font = font.clone();
 
             let change_axis: Arc<dyn Fn(usize, f32) + Send + Sync> =
                 Arc::new(move |axis, value| {
@@ -107,8 +108,6 @@ fn main() {
                         return;
                     }
 
-                    // state.disp_bins.clear();
-
                     if axis == 100 {
                         state.size = value;
                     } else {
@@ -116,10 +115,16 @@ fn main() {
                     }
 
                     let mut coords = state.axis_coords.clone();
-                    imt::util::variation::normalize_axis_coords(&font, &mut coords).unwrap();
-
-                    state.disp_bins =
-                        render_line(&bst, &font, &rasterizer, TEXT, state.size, &coords, 10.0);
+                    imt::util::variation::normalize_axis_coords(&method_font, &mut coords).unwrap();
+                    state.disp_bins = render_line(
+                        &bst,
+                        &method_font,
+                        &rasterizer,
+                        TEXT,
+                        state.size,
+                        &coords,
+                        10.0,
+                    );
 
                     println!(
                         "Time to Raster: {} ms",
@@ -127,10 +132,14 @@ fn main() {
                     );
                 });
 
+            let fvar = font.fvar_table().unwrap();
+            let name = font.name_table();
+            let axis_count = fvar.axes.len();
+
             let _size = create_slider(
                 basalt.clone(),
                 String::from("Size"),
-                150.0,
+                7.0 + (axis_count as f32 * 35.0),
                 100,
                 4.0,
                 96.0,
@@ -139,53 +148,27 @@ fn main() {
                 change_axis.clone(),
             );
 
-            let _weight = create_slider(
-                basalt.clone(),
-                String::from("Weight"),
-                115.0,
-                0,
-                100.0,
-                1000.0,
-                50.0,
-                400.0,
-                change_axis.clone(),
-            );
+            let mut _sliders = Vec::new();
 
-            let _width = create_slider(
-                basalt.clone(),
-                String::from("Width"),
-                80.0,
-                1,
-                25.0,
-                150.0,
-                5.0,
-                100.0,
-                change_axis.clone(),
-            );
+            for (i, axis) in fvar.axes.iter().enumerate().rev() {
+                let name_record = name
+                    .name_records
+                    .iter()
+                    .find(|record| record.name_id == axis.axis_name_id)
+                    .unwrap();
 
-            let _grade = create_slider(
-                basalt.clone(),
-                String::from("Grade"),
-                45.0,
-                3,
-                -200.0,
-                150.0,
-                25.0,
-                0.0,
-                change_axis.clone(),
-            );
-
-            let _slant = create_slider(
-                basalt.clone(),
-                String::from("Slant"),
-                10.0,
-                4,
-                -10.0,
-                0.0,
-                1.0,
-                0.0,
-                change_axis.clone(),
-            );
+                _sliders.push(create_slider(
+                    basalt.clone(),
+                    name_record.name.clone(),
+                    5.0 + ((axis_count - 1 - i) as f32 * 35.0),
+                    i,
+                    axis.min_value,
+                    axis.max_value,
+                    ((axis.max_value - axis.min_value) / 25.0).ceil(),
+                    axis.default_value,
+                    change_axis.clone(),
+                ));
+            }
 
             basalt.wait_for_exit().unwrap();
         }),
@@ -208,7 +191,7 @@ fn create_slider(
     name_bin
         .style_update(BinStyle {
             pad_t: Some(7.0),
-            pos_from_l: Some(10.0),
+            pos_from_r: Some(300.0),
             pos_from_b: Some(pos_from_b),
             height: Some(30.0),
             width: Some(65.0),
@@ -225,7 +208,7 @@ fn create_slider(
     slider
         .container
         .style_update(BinStyle {
-            pos_from_l: Some(75.0),
+            pos_from_r: Some(0.0),
             pos_from_b: Some(pos_from_b),
             height: Some(30.0),
             width: Some(300.0),
@@ -250,10 +233,10 @@ fn create_slider(
     slider.set_min_max(min, max);
     slider.set_step_size(step);
     slider.set(default);
-    slider.set_method(slider::Method::RoundToStep);
+    slider.set_method(slider::Method::RoundToInt);
 
     slider.on_change(move |val| {
-        call(axis, val);
+        call(axis, val.clamp(min, max));
     });
 
     slider

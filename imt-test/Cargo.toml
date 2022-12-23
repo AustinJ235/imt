@@ -6,6 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-basalt = "0.19"
+basalt = "0.19.1"
 imt = { path = "../imt" }
 parking_lot = "0.12.1"

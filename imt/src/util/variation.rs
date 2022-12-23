@@ -11,9 +11,14 @@ pub fn normalize_axis_coords(font: &Font, coords: &mut Vec<f32>) -> Result<(), I
     }
 
     for (i, coord) in coords.iter_mut().enumerate() {
-        if *coord < fvar.axes[i].min_value || *coord > fvar.axes[i].max_value {
-            // TODO: Clamp Instead?
-            return Err(ImtUtilError::InvalidCoords);
+        if *coord <= fvar.axes[i].min_value {
+            *coord = -1.0;
+            continue;
+        }
+
+        if *coord >= fvar.axes[i].max_value {
+            *coord = 1.0;
+            continue;
         }
 
         if *coord < fvar.axes[i].default_value {
@@ -48,10 +53,17 @@ pub fn normalize_axis_coords(font: &Font, coords: &mut Vec<f32>) -> Result<(), I
                     return Err(ImtUtilError::MalformedFont);
                 }
 
-                *coord = (((maps[k + 1].from_coord - *coord)
-                    / (maps[k + 1].from_coord / maps[k].from_coord))
-                    * (maps[k + 1].to_coord - maps[k].to_coord))
-                    + maps[k].to_coord;
+                if *coord == maps[k].from_coord {
+                    *coord = maps[k].to_coord;
+                } else if *coord == maps[k + 1].from_coord {
+                    *coord = maps[k + 1].to_coord;
+                } else {
+                    *coord = ((((maps[k + 1].from_coord - *coord)
+                        / (maps[k + 1].from_coord / maps[k].from_coord))
+                        * (maps[k + 1].to_coord - maps[k].to_coord))
+                        + maps[k].to_coord)
+                        .clamp(-1.0, 1.0);
+                }
             }
         }
     }
