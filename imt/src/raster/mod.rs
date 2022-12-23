@@ -39,6 +39,31 @@ pub enum ScaledGlyphErr {
     Malformed,
 }
 
+#[inline(always)]
+fn round_left(v: f32) -> f32 {
+    v.trunc() - v.is_sign_negative() as i8 as f32
+}
+
+#[inline(always)]
+fn round_right(v: f32) -> f32 {
+    v.trunc() + v.is_sign_positive() as i8 as f32
+}
+
+#[inline]
+fn f32_to_dimension(v: f32) -> Option<u32> {
+    if v < 0.0 {
+        None
+    } else {
+        let int = v as u32;
+
+        if int == 0 {
+            None
+        } else {
+            Some(int)
+        }
+    }
+}
+
 impl ScaledGlyph {
     pub fn evaluate(
         font: &Font,
@@ -107,60 +132,46 @@ impl ScaledGlyph {
         };
 
         if let Some(coords) = coords.as_ref() {
+            let width_before = outline.x_max - outline.x_min;
+
             match outline_apply_gvar(font, glyph_id, &mut outline, coords) {
                 Err(ImtUtilError::InvalidCoords) => return Err(ScaledGlyphErr::InvalidCoords),
                 Err(ImtUtilError::MalformedOutline) => return Err(ScaledGlyphErr::Malformed),
                 _ => (),
             }
+
+            advance_w += ((outline.x_max - outline.x_min) - width_before) * scaler;
         }
 
         // Horizonal
 
-        let width_f = (outline.x_max - outline.x_min) * scaler;
-        let width_r = width_f.ceil();
-        let width = width_r as u32;
-        let scaler_hori = ((width_r / width_f) * scaler) / width_r;
-        let bearing_x = (outline.x_min as f32 * scaler).round() as i16;
-        advance_w += width_r - width_f;
-        let transform_x = |x: f32| (x - outline.x_min) * scaler_hori;
+        let x_max_raw = outline.x_max * scaler;
+        let x_min_raw = outline.x_min * scaler;
+        let width_raw = x_max_raw - x_min_raw;
+        let x_max_whole = round_right(x_max_raw);
+        let x_min_whole = round_left(x_min_raw);
+        let width_whole = x_max_whole - x_min_whole;
+        let x_offset = (x_min_raw - x_min_whole) - x_min_raw;
+        let width = f32_to_dimension(width_whole).ok_or(ScaledGlyphErr::Malformed)?;
+        let bearing_x = x_min_whole as i16;
+        advance_w -= width_whole - width_raw;
 
         // Vertical
 
-        let (height, bearing_y, scaler_above, scaler_below) =
-            if outline.y_max <= 0.0 || outline.y_min >= 0.0 {
-                // Everything above or below baseline
-                let height_f = (outline.y_max - outline.y_min) * scaler;
-                let y_max_r = (outline.y_max * scaler).ceil();
-                let y_min_r = (outline.y_min * scaler).floor(); // Ceil or Floor?
-                let height_r = y_max_r - y_min_r;
-                let image_h = height_r as u32;
-                let scaler_vert = ((height_r / height_f) * scaler) / image_h as f32;
-                (image_h, y_min_r as i16, scaler_vert, scaler_vert)
-            } else {
-                // Some above and below baseline
-                let above_f = outline.y_max * scaler;
-                let below_f = outline.y_min * scaler;
-                let above_r = above_f.ceil();
-                let below_r = below_f.round(); // Ideally floor, but on small text round works better
-                let image_h = (above_r - below_r) as u32;
-                let scaler_above = ((above_r / above_f) * scaler) / image_h as f32;
-                let scaler_below = ((below_r / below_f) * scaler) / image_h as f32;
-                (image_h, below_r as i16, scaler_above, scaler_below)
-            };
+        let y_max_raw = outline.y_max * scaler;
+        let y_min_raw = outline.y_min * scaler;
+        let y_max_whole = round_right(y_max_raw);
+        let y_min_whole = round_left(y_min_raw);
+        let height_whole = y_max_whole - y_min_whole;
+        let y_offset = (y_min_raw - y_min_whole) - y_min_raw;
+        let height = f32_to_dimension(height_whole).ok_or(ScaledGlyphErr::Malformed)?;
+        let bearing_y = y_min_whole as i16;
 
-        let transform_y = |y: f32| -> f32 {
-            if y > 0.0 {
-                1.0 - ((y - outline.y_min) * scaler_above)
-            } else {
-                1.0 - ((y - outline.y_min) * scaler_below)
-            }
-        };
-
-        //
+        // Apply scaling transformations
 
         for point in outline.points.iter_mut() {
-            point.x = transform_x(point.x);
-            point.y = transform_y(point.y);
+            point.x = ((point.x * scaler) + x_offset) / width_whole;
+            point.y = (height_whole - ((point.y * scaler) + y_offset)) / height_whole;
         }
 
         outline.rebuild().unwrap();
