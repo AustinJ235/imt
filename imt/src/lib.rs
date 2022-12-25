@@ -1,4 +1,5 @@
 pub mod error;
+pub mod layout;
 pub mod parse;
 pub mod raster;
 pub mod util;

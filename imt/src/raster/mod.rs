@@ -24,8 +24,7 @@ pub struct ScaledGlyph {
     pub advance_w: i16,
     /// Outline point values will be between `0..=1` with `Y` down.
     pub outline: Option<Outline>,
-    /// An ID that is unique to the paramters used.
-    /// **Note**: This will not be unique across `Font`'s
+    /// An unique ID derived from glyph_id, size, and axis coordinates.
     pub unique_id: u64,
 }
 
