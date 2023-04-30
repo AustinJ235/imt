@@ -4,15 +4,16 @@ pub mod shaders;
 
 use std::sync::Arc;
 
-use vulkano::buffer::{BufferUsage, DeviceLocalBuffer};
+use vulkano::buffer::subbuffer::Subbuffer;
+use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage};
 use vulkano::command_buffer::allocator::StandardCommandBufferAllocator;
 use vulkano::command_buffer::{
-    AutoCommandBufferBuilder, CommandBufferExecFuture, CommandBufferUsage,
+    AutoCommandBufferBuilder, CommandBufferExecFuture, CommandBufferUsage, CopyBufferInfo,
     PrimaryCommandBufferAbstract,
 };
 use vulkano::descriptor_set::allocator::StandardDescriptorSetAllocator;
 use vulkano::device::Queue;
-use vulkano::memory::allocator::StandardMemoryAllocator;
+use vulkano::memory::allocator::{AllocationCreateInfo, MemoryUsage, StandardMemoryAllocator};
 use vulkano::pipeline::ComputePipeline;
 use vulkano::shader::ShaderModule;
 use vulkano::sync::GpuFuture;
@@ -33,7 +34,7 @@ pub struct GpuRasterizer {
     nonzero_pipeline: Arc<ComputePipeline>,
     downscale_pipeline: Arc<ComputePipeline>,
     hinting_pipeline: Arc<ComputePipeline>,
-    nonzero_raydata: Arc<DeviceLocalBuffer<[[f32; 2]]>>,
+    nonzero_raydata: Subbuffer<[[f32; 2]]>,
 }
 
 impl GpuRasterizer {
@@ -93,16 +94,42 @@ impl GpuRasterizer {
         )
         .unwrap();
 
-        let nonzero_raydata = DeviceLocalBuffer::from_iter(
+        let ray_data_len = ray_data.len();
+
+        let nonzero_raydata_cpu = Buffer::from_iter(
             &mem_alloc,
-            ray_data,
-            BufferUsage {
-                storage_buffer: true,
-                ..BufferUsage::empty()
+            BufferCreateInfo {
+                usage: BufferUsage::TRANSFER_SRC,
+                ..Default::default()
             },
-            &mut tx_cmd_b,
+            AllocationCreateInfo {
+                usage: MemoryUsage::Upload,
+                ..Default::default()
+            },
+            ray_data,
         )
         .unwrap();
+
+        let nonzero_raydata = Buffer::new_slice(
+            &mem_alloc,
+            BufferCreateInfo {
+                usage: BufferUsage::STORAGE_BUFFER | BufferUsage::TRANSFER_DST,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                usage: MemoryUsage::DeviceOnly,
+                ..Default::default()
+            },
+            ray_data_len as _,
+        )
+        .unwrap();
+
+        tx_cmd_b
+            .copy_buffer(CopyBufferInfo::buffers(
+                nonzero_raydata_cpu,
+                nonzero_raydata.clone(),
+            ))
+            .unwrap();
 
         tx_cmd_b
             .build()

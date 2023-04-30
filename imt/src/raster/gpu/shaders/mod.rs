@@ -1,11 +1,6 @@
 pub mod nonzero_cs {
     vulkano_shaders::shader! {
         ty: "compute",
-        types_meta: {
-            use bytemuck::{Pod, Zeroable};
-
-            #[derive(Clone, Copy, Zeroable, Pod)]
-        },
         path: "./src/raster/gpu/shaders/nonzero_cs.glsl"
     }
 }

@@ -1,13 +1,15 @@
 use std::sync::Arc;
 
-use vulkano::buffer::{BufferUsage, DeviceLocalBuffer};
+use vulkano::buffer::subbuffer::Subbuffer;
+use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage};
 use vulkano::command_buffer::{
-    AutoCommandBufferBuilder, CommandBufferExecFuture, CommandBufferUsage,
+    AutoCommandBufferBuilder, CommandBufferExecFuture, CommandBufferUsage, CopyBufferInfo,
     PrimaryCommandBufferAbstract,
 };
 use vulkano::descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet};
 use vulkano::format::Format;
 use vulkano::image::{ImageCreateFlags, ImageDimensions, ImageUsage, StorageImage};
+use vulkano::memory::allocator::{AllocationCreateInfo, MemoryUsage};
 use vulkano::pipeline::{Pipeline, PipelineBindPoint};
 use vulkano::sync::GpuFuture;
 
@@ -55,7 +57,7 @@ pub(super) fn raster(
         }
     }
 
-    let nonzero_info = nonzero_cs::ty::Info {
+    let nonzero_info = nonzero_cs::Info {
         extent: [glyph.width as f32 * 12.0, glyph.height as f32 * 4.0],
         numSegments: segment_data.len() as _,
         numRays: 2,
@@ -68,16 +70,42 @@ pub(super) fn raster(
     )
     .unwrap();
 
-    let nonzero_segdata = DeviceLocalBuffer::from_iter(
+    let segment_data_len = segment_data.len();
+
+    let nonzero_segdata_cpu = Buffer::from_iter(
         &rasterizer.mem_alloc,
-        segment_data,
-        BufferUsage {
-            storage_buffer: true,
-            ..BufferUsage::empty()
+        BufferCreateInfo {
+            usage: BufferUsage::TRANSFER_SRC,
+            ..Default::default()
         },
-        &mut tx_cmd_b,
+        AllocationCreateInfo {
+            usage: MemoryUsage::Upload,
+            ..Default::default()
+        },
+        segment_data,
     )
     .unwrap();
+
+    let nonzero_segdata: Subbuffer<[[f32; 4]]> = Buffer::new_slice::<[f32; 4]>(
+        &rasterizer.mem_alloc,
+        BufferCreateInfo {
+            usage: BufferUsage::STORAGE_BUFFER | BufferUsage::TRANSFER_DST,
+            ..Default::default()
+        },
+        AllocationCreateInfo {
+            usage: MemoryUsage::DeviceOnly,
+            ..Default::default()
+        },
+        segment_data_len as _,
+    )
+    .unwrap();
+
+    tx_cmd_b
+        .copy_buffer(CopyBufferInfo::buffers(
+            nonzero_segdata_cpu,
+            nonzero_segdata.clone(),
+        ))
+        .unwrap();
 
     let tx_cmd = match previous {
         Some(future) => {
@@ -111,10 +139,7 @@ pub(super) fn raster(
                 array_layers: 1,
             },
             Format::R8_UNORM,
-            ImageUsage {
-                storage: true,
-                ..ImageUsage::empty()
-            },
+            ImageUsage::STORAGE,
             ImageCreateFlags::empty(),
             [rasterizer.queue.queue_family_index()],
         )
@@ -131,10 +156,7 @@ pub(super) fn raster(
                 array_layers: 1,
             },
             Format::R8_UNORM,
-            ImageUsage {
-                storage: true,
-                ..ImageUsage::empty()
-            },
+            ImageUsage::STORAGE,
             ImageCreateFlags::empty(),
             [rasterizer.queue.queue_family_index()],
         )
@@ -151,11 +173,7 @@ pub(super) fn raster(
                 array_layers: 1,
             },
             Format::R8G8B8A8_UNORM,
-            ImageUsage {
-                storage: true,
-                sampled: true,
-                ..ImageUsage::empty()
-            },
+            ImageUsage::STORAGE | ImageUsage::SAMPLED,
             ImageCreateFlags::empty(),
             [rasterizer.queue.queue_family_index()],
         )
